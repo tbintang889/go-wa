@@ -4,20 +4,24 @@ import (
     "context"
     "os"
     "sync"
+
     "gowa/routes"
 
     "github.com/gin-gonic/gin"
-     _ "modernc.org/sqlite"  // Driver untuk SQLite
+    _ "modernc.org/sqlite"
     "github.com/mdp/qrterminal/v3"
     "go.mau.fi/whatsmeow"
+    waProto "go.mau.fi/whatsmeow/binary/proto"  // ← ALIAS: waProto
     "go.mau.fi/whatsmeow/store/sqlstore"
+    "go.mau.fi/whatsmeow/types"
     waLog "go.mau.fi/whatsmeow/util/log"
+    "google.golang.org/protobuf/proto"  // ← ini tetap proto
 )
 
 var (
     client *whatsmeow.Client
-    qrCode string  // Variable untuk menyimpan QR code
-    mu     sync.RWMutex  // Mutex untuk keamanan concurrent access
+    qrCode string
+    mu     sync.RWMutex
 )
 
 func main() {
@@ -25,10 +29,9 @@ func main() {
     dbLogger := waLog.Stdout("Database", "DEBUG", true)
 
     // Gunakan SQLite (database akan otomatis dibuat)
-    // Parameter ?_foreign_keys=on WAJIB untuk whatsmeow[citation:2][citation:4]
-     dsn := "file:whatsapp.db?_pragma=foreign_keys(1)"
+    dsn := "file:whatsapp.db?_pragma=foreign_keys(1)"
 
-    container, err := sqlstore.New(ctx,"sqlite", dsn, dbLogger)
+    container, err := sqlstore.New(ctx, "sqlite", dsn, dbLogger)
     if err != nil {
         panic(err)
     }
@@ -48,8 +51,12 @@ func main() {
                 mu.Lock()
                 qrCode = evt.Code
                 mu.Unlock()
-                // Console QR tetap ada untuk debugging
                 qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
+            } else if evt.Event == "success" {
+                println("Login successful!")
+                mu.Lock()
+                qrCode = ""
+                mu.Unlock()
             }
         }
     }()
@@ -61,7 +68,7 @@ func main() {
     // API server
     r := gin.Default()
     
-    // Endpoint QR Code
+    // ==================== QR CODE ENDPOINTS ====================
     r.GET("/api/qr", func(c *gin.Context) {
         mu.RLock()
         code := qrCode
@@ -69,7 +76,7 @@ func main() {
         
         if client.IsLoggedIn() {
             c.JSON(200, gin.H{
-                "status": "connected",
+                "status":  "connected",
                 "message": "Already logged in",
             })
             return
@@ -77,19 +84,18 @@ func main() {
         
         if code == "" {
             c.JSON(200, gin.H{
-                "status": "waiting",
+                "status":  "waiting",
                 "message": "Waiting for QR code...",
             })
             return
         }
         
         c.JSON(200, gin.H{
-            "status": "pending",
+            "status":  "pending",
             "qr_code": code,
         })
     })
     
-    // Endpoint status lengkap
     r.GET("/api/status-full", func(c *gin.Context) {
         c.JSON(200, gin.H{
             "is_connected": client.IsConnected(),
@@ -98,9 +104,62 @@ func main() {
         })
     })
     
-    // Routes WhatsApp
+    // ==================== CHAT ROOM ENDPOINTS ====================
+    r.GET("/chat", func(c *gin.Context) {
+        c.HTML(200, "chat.html", gin.H{})
+    })
+    
+    r.GET("/api/chats", func(c *gin.Context) {
+        contacts, err := client.Store.Contacts.GetAllContacts(context.Background())
+        if err != nil {
+            c.JSON(500, gin.H{"error": err.Error()})
+            return
+        }
+        
+        chatList := []gin.H{}
+        for jid, contact := range contacts {
+            chatList = append(chatList, gin.H{
+                "jid":    jid,
+                "name":   contact.PushName,
+                "number": jid,
+            })
+        }
+        c.JSON(200, chatList)
+    })
+    
+    r.GET("/api/messages/:jid", func(c *gin.Context) {
+        // TODO: Implement dengan database untuk menyimpan riwayat pesan
+        c.JSON(200, []gin.H{})
+    })
+    
+    r.POST("/api/send-message", func(c *gin.Context) {
+        var req struct {
+            To   string `json:"to"`
+            Text string `json:"text"`
+        }
+        if err := c.ShouldBindJSON(&req); err != nil {
+            c.JSON(400, gin.H{"error": err.Error()})
+            return
+        }
+        
+        jid := types.JID{User: req.To, Server: "s.whatsapp.net"}
+        
+        // Gunakan waProto (bukan proto) untuk Message
+        _, err := client.SendMessage(context.Background(), jid, &waProto.Message{
+            Conversation: proto.String(req.Text),  // proto.String dari google.golang.org/protobuf/proto
+        })
+        if err != nil {
+            c.JSON(500, gin.H{"error": err.Error()})
+            return
+        }
+        
+        c.JSON(200, gin.H{"status": "sent"})
+    })
+    
+    // ==================== WHATSAPP ROUTES ====================
     routes.WaRoutes(r, client)
 
+    // ==================== TEMPLATES ====================
     r.LoadHTMLGlob("templates/*")
     r.GET("/", func(c *gin.Context) {
         c.HTML(200, "index.html", gin.H{})
