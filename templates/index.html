@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .status-card {
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .status {
+            font-size: 24px;
+            margin: 15px 0;
+        }
+        .connected { color: #4ade80; }
+        .disconnected { color: #f87171; }
+        .qr-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { background: #5a67d8; }
+        .api-endpoints {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+        .endpoint {
+            margin: 10px 0;
+            padding: 8px;
+            background: #2d2d2d;
+            border-radius: 5px;
+        }
+        .method { color: #4ade80; font-weight: bold; }
+        .path { color: #fbbf24; }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+        h2 { margin-bottom: 15px; color: #333; }
+        h3 { margin-bottom: 10px; color: #667eea; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Status Card -->
+        <div class="card status-card">
+            <h1>🤖 WhatsApp Bot Dashboard</h1>
+            <div class="status" id="status-text">Checking connection...</div>
+            <div id="status-detail"></div>
+            <button onclick="refreshStatus()">🔄 Refresh Status</button>
+            <button onclick="logout()" style="background: #dc2626;">🚪 Logout</button>
+        </div>
+
+        <!-- QR Code Card (hidden when connected) -->
+        <div class="card" id="qr-card" style="display: none;">
+            <h2>📱 Scan QR Code</h2>
+            <p>Buka WhatsApp > Settings > Linked Devices > Link a Device</p>
+            <div class="qr-container">
+                <div id="qrcode"></div>
+            </div>
+            <p style="text-align: center; color: #666;">QR code akan refresh otomatis setiap 10 detik</p>
+        </div>
+
+        <!-- Features Grid -->
+        <div class="grid-2">
+            <!-- Messaging Card -->
+            <div class="card">
+                <h2>💬 Messaging</h2>
+                <div class="api-endpoints">
+                    <div class="endpoint">
+                        <span class="method">POST</span> <span class="path">/api/send-text</span><br>
+                        Body: { "to": "628xxxx", "text": "message" }
+                    </div>
+                    <div class="endpoint">
+                        <span class="method">POST</span> <span class="path">/api/send-media</span><br>
+                        Body: { "to": "628xxxx", "media_type": "image", "file_path": "path.jpg" }
+                    </div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <input type="text" id="test-number" placeholder="628xxxx (nomor tujuan)" style="width: 100%; padding: 8px; margin: 5px 0;">
+                    <input type="text" id="test-message" placeholder="Pesan test" style="width: 100%; padding: 8px; margin: 5px 0;">
+                    <button onclick="sendTestMessage()">📤 Kirim Test Message</button>
+                </div>
+            </div>
+
+            <!-- Data & Groups Card -->
+            <div class="card">
+                <h2>📊 Data & Groups</h2>
+                <div class="api-endpoints">
+                    <div class="endpoint">
+                        <span class="method">GET</span> <span class="path">/api/contacts</span> - Daftar kontak
+                    </div>
+                    <div class="endpoint">
+                        <span class="method">GET</span> <span class="path">/api/groups</span> - Daftar grup
+                    </div>
+                    <div class="endpoint">
+                        <span class="method">GET</span> <span class="path">/api/group-members?group_id=...</span>
+                    </div>
+                </div>
+                <button onclick="fetchContacts()">📇 Ambil Kontak</button>
+                <button onclick="fetchGroups()">👥 Ambil Grup</button>
+                <pre id="data-result" style="margin-top: 15px; background: #f0f0f0; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 11px;"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let qrInterval;
+        
+        function refreshStatus() {
+            fetch('/api/status-full')
+                .then(res => res.json())
+                .then(data => {
+                    const statusText = document.getElementById('status-text');
+                    const statusDetail = document.getElementById('status-detail');
+                    const qrCard = document.getElementById('qr-card');
+                    
+                    if (data.is_logged_in && data.is_connected) {
+                        statusText.innerHTML = '✅ Connected';
+                        statusText.className = 'status connected';
+                        statusDetail.innerHTML = 'WhatsApp Bot is ready to use';
+                        qrCard.style.display = 'none';
+                        if (qrInterval) clearInterval(qrInterval);
+                    } else {
+                        statusText.innerHTML = '❌ Disconnected';
+                        statusText.className = 'status disconnected';
+                        statusDetail.innerHTML = 'Please scan QR code to connect';
+                        qrCard.style.display = 'block';
+                        fetchQRCode();
+                        if (!qrInterval) {
+                            qrInterval = setInterval(fetchQRCode, 10000);
+                        }
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function fetchQRCode() {
+            fetch('/api/qr')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'pending' && data.qr_code) {
+                        const qrDiv = document.getElementById('qrcode');
+                        qrDiv.innerHTML = '';
+                        new QRCode(qrDiv, {
+                            text: data.qr_code,
+                            width: 250,
+                            height: 250
+                        });
+                    } else if (data.status === 'connected') {
+                        document.getElementById('qr-card').style.display = 'none';
+                        refreshStatus();
+                    }
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function sendTestMessage() {
+            const to = document.getElementById('test-number').value;
+            const text = document.getElementById('test-message').value;
+            
+            if (!to || !text) {
+                alert('Isi nomor dan pesan terlebih dahulu');
+                return;
+            }
+            
+            fetch('/api/send-text', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, text })
+            })
+            .then(res => res.json())
+            .then(data => alert(data.status === 'sent' ? '✅ Pesan terkirim!' : '❌ Gagal: ' + JSON.stringify(data)))
+            .catch(err => alert('Error: ' + err));
+        }
+        
+        function fetchContacts() {
+            fetch('/api/contacts')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('data-result').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function fetchGroups() {
+            fetch('/api/groups')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('data-result').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(err => console.error(err));
+        }
+        
+        function logout() {
+            // Note: Logout perlu diimplementasikan di backend
+            alert('Logout feature - akan disconnect session');
+        }
+        
+        // Initial load
+        refreshStatus();
+        setInterval(refreshStatus, 5000);
+    </script>
+</body>
+</html>
