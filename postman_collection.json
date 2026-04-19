@@ -1,0 +1,330 @@
+{
+  "info": {
+    "name": "GOWA API",
+    "description": "Complete API documentation for WhatsApp Bot",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "🔐 Auth & Status",
+      "item": [
+        {
+          "name": "Get QR Code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/qr",
+              "host": ["{{base_url}}"],
+              "path": ["api", "qr"]
+            }
+          }
+        },
+        {
+          "name": "Get Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "status"]
+            }
+          }
+        },
+        {
+          "name": "Get Full Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/status-full",
+              "host": ["{{base_url}}"],
+              "path": ["api", "status-full"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "💬 Messaging",
+      "item": [
+        {
+          "name": "Send Text Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"628123456789\",\n  \"text\": \"Hello from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/send-text",
+              "host": ["{{base_url}}"],
+              "path": ["api", "send-text"]
+            }
+          }
+        },
+        {
+          "name": "Send Message (Alternative)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"628123456789\",\n  \"text\": \"Hello from Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/send-message",
+              "host": ["{{base_url}}"],
+              "path": ["api", "send-message"]
+            }
+          }
+        },
+        {
+          "name": "Send Media",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"628123456789\",\n  \"media_type\": \"image\",\n  \"file_path\": \"path/to/image.jpg\",\n  \"caption\": \"My image caption\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/send-media",
+              "host": ["{{base_url}}"],
+              "path": ["api", "send-media"]
+            }
+          }
+        },
+        {
+          "name": "Get Messages History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/messages/628123456789@s.whatsapp.net",
+              "host": ["{{base_url}}"],
+              "path": ["api", "messages", "628123456789@s.whatsapp.net"]
+            }
+          }
+        },
+        {
+          "name": "Get Delivery Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/delivery-status?message_id=123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "delivery-status"],
+              "query": [
+                {
+                  "key": "message_id",
+                  "value": "123"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "👥 Contacts & Groups",
+      "item": [
+        {
+          "name": "Get All Chats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/chats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "chats"]
+            }
+          }
+        },
+        {
+          "name": "Get Contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/contacts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts"]
+            }
+          }
+        },
+        {
+          "name": "Get Groups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/groups",
+              "host": ["{{base_url}}"],
+              "path": ["api", "groups"]
+            }
+          }
+        },
+        {
+          "name": "Get Group Members",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/group-members?group_id=1234567890@g.us",
+              "host": ["{{base_url}}"],
+              "path": ["api", "group-members"],
+              "query": [
+                {
+                  "key": "group_id",
+                  "value": "1234567890@g.us"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🖼️ Media",
+      "item": [
+        {
+          "name": "Get Media File",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/media/123",
+              "host": ["{{base_url}}"],
+              "path": ["api", "media", "123"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔧 Debug",
+      "item": [
+        {
+          "name": "Debug Chats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/debug/chats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "debug", "chats"]
+            }
+          }
+        },
+        {
+          "name": "List All Routes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/routes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "routes"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📡 Webhook",
+      "item": [
+        {
+          "name": "Incoming Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sender\": \"628123456789\",\n  \"message\": \"Hello from webhook\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/webhook/incoming",
+              "host": ["{{base_url}}"],
+              "path": ["webhook", "incoming"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🌐 WebSocket",
+      "item": [
+        {
+          "name": "WebSocket Connection",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "ws://{{base_url}}/ws",
+              "protocol": "ws",
+              "host": ["{{base_url}}"],
+              "path": ["ws"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🖥️ UI Pages",
+      "item": [
+        {
+          "name": "Dashboard QR",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            }
+          }
+        },
+        {
+          "name": "Chat Room",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": ["{{base_url}}"],
+              "path": ["chat"]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "localhost:8080",
+      "type": "string"
+    }
+  ]
+}

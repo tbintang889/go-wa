@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -512,6 +513,7 @@ func main() {
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(200, "index.html", gin.H{})
 	})
+	
 	// Endpoint untuk mengakses file media
 	r.GET("/api/media/:id", func(c *gin.Context) {
 		id := c.Param("id")
@@ -531,6 +533,26 @@ func main() {
 
 		c.File(mediaPath)
 	})
+	r.GET("/api/routes", func(c *gin.Context) {
+		routes := []gin.H{}
+
+		for _, route := range r.Routes() {
+			// Dapatkan nama handler function
+			handlerName := runtime.FuncForPC(reflect.ValueOf(route.HandlerFunc).Pointer()).Name()
+
+			routes = append(routes, gin.H{
+				"method":  route.Method,
+				"path":    route.Path,
+				"handler": handlerName,
+			})
+		}
+
+		c.JSON(200, gin.H{
+			"total_routes": len(routes),
+			"routes":       routes,
+		})
+	})
+
 	// Auto open browser
 	go func() {
 		println("Server running at http://localhost:8080")
