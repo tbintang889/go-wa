@@ -32,30 +32,32 @@
 
 ## 🚀 Fitur Utama
 
-| Fitur | Deskripsi |
-|-------|-----------|
+
+| Fitur                      | Deskripsi                                                                 |
+| -------------------------- | ------------------------------------------------------------------------- |
 | **🔐 Autentikasi QR Code** | Login WhatsApp dengan scan QR code sekali, sesi tersimpan secara permanen |
-| **💬 Real-Time Chat** | Kirim dan terima pesan secara instan dengan WebSocket |
-| **📱 Chat Room Web** | Antarmuka web mirip WhatsApp Web untuk mengelola percakapan |
-| **📊 REST API** | Endpoint lengkap untuk integrasi dengan sistem lain |
-| **👥 Grup & Kontak** | Kelola grup, lihat anggota, dan daftar kontak |
-| **🖼️ Media Support** | Kirim dan terima gambar, dokumen, stiker |
-| **🔔 Notifikasi** | Notifikasi desktop dan suara saat pesan baru masuk |
-| **📦 Database SQLite** | Penyimpanan pesan dan kontak dengan performa ringan |
-| **🔄 Auto-Reconnect** | Koneksi otomatis pulih jika terputus |
+| **💬 Real-Time Chat**      | Kirim dan terima pesan secara instan dengan WebSocket                     |
+| **📱 Chat Room Web**       | Antarmuka web mirip WhatsApp Web untuk mengelola percakapan               |
+| **📊 REST API**            | Endpoint lengkap untuk integrasi dengan sistem lain                       |
+| **👥 Grup & Kontak**       | Kelola grup, lihat anggota, dan daftar kontak                             |
+| **🖼️ Media Support**     | Kirim dan terima gambar, dokumen, stiker                                  |
+| **🔔 Notifikasi**          | Notifikasi desktop dan suara saat pesan baru masuk                        |
+| **📦 Database SQLite**     | Penyimpanan pesan dan kontak dengan performa ringan                       |
+| **🔄 Auto-Reconnect**      | Koneksi otomatis pulih jika terputus                                      |
 
 ---
 
 ## 🛠️ Teknologi yang Digunakan
 
-| Teknologi | Versi | Kegunaan |
-|-----------|-------|----------|
-| [Go](https://golang.org/) | 1.21+ | Bahasa pemrograman utama |
-| [whatsmeow](https://github.com/tulir/whatsmeow) | latest | Library WhatsApp Multi-Device |
-| [Gin](https://gin-gonic.com/) | v1.9+ | Web framework |
-| [Gorilla WebSocket](https://github.com/gorilla/websocket) | v1.5+ | WebSocket server |
-| [SQLite](https://www.sqlite.org/) | 3 | Database penyimpanan pesan |
-| [modernc.org/sqlite](https://modernc.org/sqlite) | latest | SQLite driver pure Go |
+
+| Teknologi                                                 | Versi  | Kegunaan                      |
+| --------------------------------------------------------- | ------ | ----------------------------- |
+| [Go](https://golang.org/)                                 | 1.21+  | Bahasa pemrograman utama      |
+| [whatsmeow](https://github.com/tulir/whatsmeow)           | latest | Library WhatsApp Multi-Device |
+| [Gin](https://gin-gonic.com/)                             | v1.9+  | Web framework                 |
+| [Gorilla WebSocket](https://github.com/gorilla/websocket) | v1.5+  | WebSocket server              |
+| [SQLite](https://www.sqlite.org/)                         | 3      | Database penyimpanan pesan    |
+| [modernc.org/sqlite](https://modernc.org/sqlite)          | latest | SQLite driver pure Go         |
 
 ---
 
@@ -71,7 +73,7 @@
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/yourusername/gowa.git
+git clone https://github.com/github.com/tbintang889/go-wa.git
 cd gowa
 
 # 2. Download dependencies
@@ -83,3 +85,4 @@ go build -o gowa.exe
 
 # 4. Jalankan aplikasi
 go run main.go
+```
