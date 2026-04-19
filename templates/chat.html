@@ -320,6 +320,19 @@
         <div class="sidebar-header">
           <h2>WhatsApp Bot</h2>
           <div class="status-badge" id="connection-status">Connecting...</div>
+          <button
+            onclick="enableNotifications()"
+            style="
+              margin-top: 10px;
+              background: #25d366;
+              border: none;
+              padding: 5px 10px;
+              border-radius: 5px;
+              cursor: pointer;
+            "
+          >
+            🔔 Enable Notifications
+          </button>
         </div>
         <div class="search-box">
           <input
@@ -380,6 +393,12 @@
       let isLoading = false;
       let hasMore = true;
       let totalMessages = 0;
+      /* 
+      let notificationSound = new Audio(
+        "https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3",
+      ); */
+      let unreadCount = 0;
+      let originalTitle = document.title;
 
       let ws;
       // Tambahkan fungsi normalisasi JID
@@ -400,33 +419,43 @@
         };
 
         ws.onmessage = function (event) {
-          const data = JSON.parse(event.data);
-          console.log("WebSocket message:", data);
+    const data = JSON.parse(event.data);
+    console.log("WebSocket message:", data);
 
-          if (data.type === "new_message") {
-            const msg = data.message;
-            // Cek apakah pesan untuk kontak yang sedang aktif
-            if (
-              currentContact &&
-              (msg.from_jid === currentContact.jid ||
-                msg.to_jid === currentContact.jid)
-            ) {
-              addMessageToBottom(msg.content, msg.is_from_me);
-              totalMessages++;
-            }
-          } else if (data.type === "message_status") {
-            // Update status pesan yang sudah terkirim
-            const statusData = data.data;
-            updateMessageStatus(
-              statusData.id,
-              statusData.status,
-              statusData.error,
-            );
-          } else if (data.type === "login_success") {
-            console.log("Login success, refreshing contacts...");
+    if (data.type === "new_message") {
+        const msg = data.message;
+        
+        // Cek apakah pesan dari kontak yang sedang aktif
+        const isCurrentChat = currentContact && (msg.from_jid === currentContact.jid || msg.to_jid === currentContact.jid);
+        
+        console.log("isCurrentChat:", isCurrentChat);
+        console.log("currentContact:", currentContact);
+        console.log("msg.from_jid:", msg.from_jid);
+        
+        if (isCurrentChat) {
+            // Jika sedang di chat yang sama, langsung tampilkan
+            addMessageToBottom(msg.content, msg.is_from_me);
+            totalMessages++;
+            console.log("✅ Added to current chat");
+        } else {
+            // Jika pesan dari chat lain, baru muncul notifikasi
+            console.log("🔔 New message from other chat!");
+            
+            unreadCount++;
+            updateTitleNotification(unreadCount);
+            
+            // Play suara (opsional)
+            // playNotificationSound();
+            
+            // Tampilkan notifikasi desktop
+            const senderName = msg.push_name || msg.from_jid.split('@')[0];
+            showDesktopNotification(senderName, msg.content);
+            
+            // Refresh kontak list untuk update last message
             loadContacts();
-          }
-        };
+        }
+    }
+};
 
         // Fungsi untuk update status pesan
         function updateMessageStatus(messageId, status, errorMsg) {
@@ -841,6 +870,76 @@
       const searchInput = document.getElementById("searchInput");
       if (searchInput) {
         searchInput.addEventListener("input", () => renderContacts());
+      }
+
+      // Fungsi untuk play suara notifikasi
+      function playNotificationSound() {
+        try {
+          notificationSound
+            .play()
+            .catch((e) => console.log("Audio play failed:", e));
+        } catch (e) {
+          console.log("Audio not supported");
+        }
+      }
+
+      // Fungsi untuk update title dengan unread count
+      function updateTitleNotification(count) {
+        if (count > 0) {
+          document.title = `(${count}) ${originalTitle}`;
+        } else {
+          document.title = originalTitle;
+        }
+      }
+
+      // Fungsi request izin notifikasi browser
+      function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
+        }
+      }
+
+      // Fungsi tampilkan notifikasi desktop
+      function showDesktopNotification(sender, message, isGroup = false) {
+        if (!("Notification" in window)) return;
+        if (Notification.permission !== "granted") return;
+
+        const options = {
+          body: message,
+          icon: "https://web.whatsapp.com/favicon.ico",
+          tag: sender,
+          requireInteraction: false,
+          silent: false,
+        };
+
+        const title = isGroup ? `📢 ${sender}` : `💬 ${sender}`;
+        const notification = new Notification(title, options);
+
+        // Klik notifikasi untuk fokus ke tab
+        notification.onclick = function () {
+          window.focus();
+          notification.close();
+        };
+
+        // Auto close setelah 5 detik
+        setTimeout(() => notification.close(), 5000);
+      }
+      window.addEventListener("focus", function () {
+        unreadCount = 0;
+        updateTitleNotification(0);
+      });
+      requestNotificationPermission();
+      // Fungsi untuk enable notifikasi
+      function enableNotifications() {
+        if ("Notification" in window) {
+          Notification.requestPermission().then((perm) => {
+            if (perm === "granted") {
+              alert("Notifikasi diaktifkan!");
+            }
+          });
+        } else {
+          alert("Browser tidak support notifikasi");
+        }
       }
     </script>
   </body>
