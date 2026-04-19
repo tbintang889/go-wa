@@ -2,22 +2,20 @@ package handlers
 
 import (
     "fmt"
- 
-     "gowa/utils"  // ← IMPORT PACKAGE UTILS
+
     "gowa/database"
+    "gowa/utils"
 
     "go.mau.fi/whatsmeow"
 
     "go.mau.fi/whatsmeow/types/events"
 )
 
-// MessageHandler struct untuk menyimpan client dan fungsi broadcast
 type MessageHandler struct {
-    Client          *whatsmeow.Client
-    BroadcastFunc   func(interface{}) // Fungsi broadcast ke WebSocket
+    Client        *whatsmeow.Client
+    BroadcastFunc func(interface{})
 }
 
-// NewMessageHandler membuat instance baru
 func NewMessageHandler(client *whatsmeow.Client, broadcastFunc func(interface{})) *MessageHandler {
     return &MessageHandler{
         Client:        client,
@@ -35,20 +33,21 @@ func (h *MessageHandler) HandleIncomingMessage(v *events.Message) {
     // Deteksi jenis chat dari JID
     chatType := utils.DetectChatType(v.Info.Chat)
     
-    // Proses berdasarkan jenis chat
+    // ========== FILTER: HANYA chat pribadi dan grup ==========
+    // NON-CHAT (status, broadcast, newsletter) TIDAK diproses
     switch chatType {
     case "PRIVATE":
         h.handlePrivateChat(v)
     case "GROUP":
         h.handleGroupChat(v)
-    case "BROADCAST":
-        h.handleBroadcast(v)
-    case "NEWSLETTER":
-        h.handleNewsletter(v)
-    case "STATUS":
-        h.handleStatus(v)
+    // case "BROADCAST", "NEWSLETTER", "STATUS":
+    //     // TIDAK dilakukan apa-apa (tidak simpan, tidak broadcast)
+    //     fmt.Printf("⏭️ Skipping non-chat: %s\n", chatType)
+    //     return
     default:
-        fmt.Printf("Unknown chat type: %s\n", chatType)
+        // Unknown atau non-chat, diabaikan
+        fmt.Printf("⏭️ Skipping: %s\n", chatType)
+        return
     }
 }
 
@@ -59,12 +58,10 @@ func (h *MessageHandler) handlePrivateChat(v *events.Message) {
         return
     }
     
-    // Tentukan JID penerima (bot)
     botJID := h.Client.Store.ID.String()
     senderJID := v.Info.Sender.String()
     chatJID := v.Info.Chat.String()
     
-    // Jika sender == chat (personal chat), gunakan botJID sebagai penerima
     if senderJID == chatJID {
         chatJID = botJID
     }
@@ -127,22 +124,4 @@ func (h *MessageHandler) handleGroupChat(v *events.Message) {
             },
         })
     }
-}
-
-// handleBroadcast - penanganan siaran (biasanya tidak perlu disimpan)
-func (h *MessageHandler) handleBroadcast(v *events.Message) {
-    fmt.Printf("📢 [BROADCAST] from: %s\n", v.Info.Sender)
-    // Skip, tidak perlu disimpan ke database
-}
-
-// handleNewsletter - penanganan channel/newsletter
-func (h *MessageHandler) handleNewsletter(v *events.Message) {
-    fmt.Printf("📰 [NEWSLETTER] update from: %s\n", v.Info.Sender)
-    // Channel tidak bisa dibalas, skip simpan
-}
-
-// handleStatus - penanganan status
-func (h *MessageHandler) handleStatus(v *events.Message) {
-    fmt.Printf("💬 [STATUS] from: %s\n", v.Info.Sender)
-    // Skip, tidak perlu disimpan
 }

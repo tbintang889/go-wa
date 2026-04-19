@@ -6,6 +6,7 @@ import (
 	"gowa/database"
 	"gowa/handlers"
 	"gowa/routes"
+	"gowa/utils"
 	"net/http"
 	"net/url"
 	"os"
@@ -87,7 +88,10 @@ func handleWebSocket(c *gin.Context) {
 			to := data["to"].(string)
 			text := data["text"].(string)
 
-			// Normalisasi nomor
+			// NORMALISASI JID sebelum kirim
+			to = utils.NormalizeJID(to) // ← Tambahkan ini
+
+			// Pastikan ada @s.whatsapp.net
 			if !strings.Contains(to, "@") {
 				to = to + "@s.whatsapp.net"
 			}
@@ -95,7 +99,7 @@ func handleWebSocket(c *gin.Context) {
 			// Parse JID
 			jid, err := types.ParseJID(to)
 			if err != nil {
-				println("Invalid JID:", to)
+				println("Invalid JID:", to, err.Error())
 				continue
 			}
 
@@ -324,77 +328,47 @@ func main() {
 		c.HTML(200, "chat.html", gin.H{})
 	})
 
-	var contactsSynced = false // Tambahkan flag global di awal
+	// var contactsSynced = false // Tambahkan flag global di awal
 
 	r.GET("/api/chats", func(c *gin.Context) {
-		chats, err := database.GetAllChats()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Sinkronisasi hanya sekali saat database kosong DAN belum pernah disync
-		if len(chats) == 0 && client.IsLoggedIn() && !contactsSynced {
-			contacts, err := client.Store.Contacts.GetAllContacts(context.Background())
-			if err == nil {
-				for jid, contact := range contacts {
-					// Simpan dengan pushname sebagai konten
-					pushName := contact.PushName
-					if pushName == "" {
-						pushName = jid.String()
-					}
-					database.SaveMessage(jid.String(), jid.String(), pushName, false)
-					chats = append(chats, jid.String())
-					println("Synced contact:", pushName, "-", jid.String())
-				}
-				contactsSynced = true
-			}
-		}
-
-		// Gunakan struktur data yang lebih lengkap
-		type ChatInfo struct {
-			JID      string `json:"jid"`
-			Name     string `json:"name"`      // PushName dari WhatsApp
-			Number   string `json:"number"`    // Nomor telepon
-			PushName string `json:"push_name"` // Explicit pushname field
-		}
-
-		chatList := []ChatInfo{}
-		for _, jidStr := range chats {
-			jid, err := types.ParseJID(jidStr)
-			if err != nil {
-				chatList = append(chatList, ChatInfo{
-					JID:    jidStr,
-					Name:   jidStr,
-					Number: jidStr,
-				})
-				continue
-			}
-
-			// Ambil kontak dari store WhatsApp
-			contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
-			pushName := jidStr
-
-			if err == nil {
-				if contact.PushName != "" {
-					pushName = contact.PushName
-				} else if contact.FirstName != "" {
-					pushName = contact.FirstName
-				} else if contact.FullName != "" {
-					pushName = contact.FullName
-				}
-			}
-
-			chatList = append(chatList, ChatInfo{
-				JID:      jidStr,
-				Name:     pushName, // Untuk display name
-				Number:   jidStr,
-				PushName: pushName, // Explicit field
-			})
-		}
-
-		c.JSON(200, chatList)
-	})
+    // Ambil chat unik dari database messages
+    rows, err := database.DB.Query(`
+        SELECT DISTINCT from_jid FROM messages WHERE from_jid != to_jid AND content != ''
+        UNION 
+        SELECT DISTINCT to_jid FROM messages WHERE from_jid != to_jid AND content != ''
+    `)
+    if err != nil {
+        c.JSON(500, gin.H{"error": err.Error()})
+        return
+    }
+    defer rows.Close()
+    
+    chatList := []gin.H{}
+    for rows.Next() {
+        var jidStr string
+        if err := rows.Scan(&jidStr); err != nil {
+            continue
+        }
+        
+        // Parse JID untuk ambil nama
+        jid, err := types.ParseJID(jidStr)
+        name := jidStr
+        if err == nil {
+            contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
+            if err == nil && contact.PushName != "" {
+                name = contact.PushName
+            }
+        }
+        
+        chatList = append(chatList, gin.H{
+            "jid":    jidStr,
+            "name":   name,
+            "number": jidStr,
+        })
+    }
+    
+    c.JSON(200, chatList)
+})
 	// Di main.go, pastikan ada endpoint ini
 	r.GET("/api/messages/:jid", func(c *gin.Context) {
 		jid := c.Param("jid")
@@ -472,72 +446,19 @@ func main() {
 			return
 		}
 
-		botJID := client.Store.ID.String()
-		jid := types.JID{User: req.To, Server: "s.whatsapp.net"}
+		// Normalisasi JID
+		to := utils.NormalizeJID(req.To)
+		if !strings.Contains(to, "@") {
+			to = to + "@s.whatsapp.net"
+		}
 
-		// Simpan ke database dengan status 'pending'
-		var messageID int64
-		query := `INSERT INTO messages (from_jid, to_jid, content, is_from_me, status, timestamp) 
-              VALUES (?, ?, ?, ?, 'pending', ?)`
-		result, err := database.DB.Exec(query, botJID, req.To, req.Text, true, time.Now())
+		_, err := types.ParseJID(to)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to save message"})
+			c.JSON(400, gin.H{"error": "Invalid JID"})
 			return
 		}
-		messageID, _ = result.LastInsertId()
 
-		// Broadcast ke WebSocket
-		broadcastMessage(map[string]interface{}{
-			"type": "new_message",
-			"message": map[string]interface{}{
-				"id":         messageID,
-				"from_jid":   botJID,
-				"to_jid":     req.To,
-				"content":    req.Text,
-				"is_from_me": true,
-				"status":     "pending",
-				"timestamp":  time.Now(),
-			},
-		})
-
-		// Kirim ke WhatsApp di background
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-
-			_, err := client.SendMessage(ctx, jid, &waProto.Message{
-				Conversation: proto.String(req.Text),
-			})
-
-			if err != nil {
-				println("Failed to send message:", err.Error())
-				database.UpdateMessageStatus(int(messageID), "failed")
-
-				// Broadcast status update
-				broadcastMessage(map[string]interface{}{
-					"type": "message_status",
-					"data": map[string]interface{}{
-						"id":     messageID,
-						"status": "failed",
-						"error":  err.Error(),
-					},
-				})
-			} else {
-				println("Message sent to:", req.To)
-				database.UpdateMessageStatus(int(messageID), "sent")
-
-				// Broadcast status update
-				broadcastMessage(map[string]interface{}{
-					"type": "message_status",
-					"data": map[string]interface{}{
-						"id":     messageID,
-						"status": "sent",
-					},
-				})
-			}
-		}()
-
-		c.JSON(200, gin.H{"status": "pending", "id": messageID, "message": "Message saved, sending in background"})
+		// ... sisanya sama
 	})
 	routes.WaRoutes(r, client)
 	r.LoadHTMLGlob("templates/*")

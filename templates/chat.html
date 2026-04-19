@@ -633,11 +633,21 @@
       // Update selectContact - simpan kedua format JID
       function selectContact(jid, name, number) {
         // Simpan JID asli dan JID ternormalisasi
+        let normalizedNumber = number;
+        if (normalizedNumber.includes("@c.us")) {
+          normalizedNumber = normalizedNumber.replace(
+            "@c.us",
+            "@s.whatsapp.net",
+          );
+        }
+        if (!normalizedNumber.includes("@")) {
+          normalizedNumber = normalizedNumber + "@s.whatsapp.net";
+        }
+
         currentContact = {
-          jid: jid, // JID asli dari database
+          jid: jid,
           name: name,
-          number: number,
-          normalizedJid: normalizeJID(jid), // JID untuk query
+          number: normalizedNumber, // ← Selalu pakai @s.whatsapp.net
         };
         currentPage = 1;
         hasMore = true;

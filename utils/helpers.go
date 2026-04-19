@@ -8,7 +8,7 @@ import (
     waProto "go.mau.fi/whatsmeow/binary/proto"
 )
 
-// DetectChatType - deteksi jenis chat dari JID (huruf besar D)
+// DetectChatType - deteksi jenis chat dari JID
 func DetectChatType(jid types.JID) string {
     switch jid.Server {
     case "s.whatsapp.net":
@@ -29,7 +29,12 @@ func DetectChatType(jid types.JID) string {
     }
 }
 
-// ExtractMessageContent - ekstrak konten pesan (huruf besar E)
+// IsChatable - apakah chat ini bisa dibalas/disimpan? (hanya PRIVATE dan GROUP)
+func IsChatable(chatType string) bool {
+    return chatType == "PRIVATE" || chatType == "GROUP"
+}
+
+// ExtractMessageContent - ekstrak konten pesan
 func ExtractMessageContent(msg *waProto.Message) string {
     if msg == nil {
         return ""
@@ -75,7 +80,7 @@ func ExtractMessageContent(msg *waProto.Message) string {
 }
 
 // NormalizeJID - normalisasi format JID
-func NormalizeJID(jid string) string {
+/* func NormalizeJID(jid string) string {
     if strings.Contains(jid, ":") {
         parts := strings.Split(jid, ":")
         if strings.Contains(parts[0], "@") {
@@ -84,8 +89,31 @@ func NormalizeJID(jid string) string {
         return parts[0] + "@s.whatsapp.net"
     }
     return jid
-}
+} */
 
+// NormalizeJID - normalisasi format JID ke format terbaru
+func NormalizeJID(jid string) string {
+    // Ubah @c.us menjadi @s.whatsapp.net
+    if strings.HasSuffix(jid, "@c.us") {
+        return strings.TrimSuffix(jid, "@c.us") + "@s.whatsapp.net"
+    }
+    
+    // Ubah @lid menjadi @s.whatsapp.net (opsional, hati-hati)
+    // if strings.HasSuffix(jid, "@lid") {
+    //     return strings.TrimSuffix(jid, "@lid") + "@s.whatsapp.net"
+    // }
+    
+    // Hapus bagian :64 atau :0 dari JID
+    if strings.Contains(jid, ":") {
+        parts := strings.Split(jid, ":")
+        if strings.Contains(parts[0], "@") {
+            return parts[0]
+        }
+        return parts[0] + "@s.whatsapp.net"
+    }
+    
+    return jid
+}
 // FormatTimestamp - format timestamp
 func FormatTimestamp(t time.Time) string {
     now := time.Now()
