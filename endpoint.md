@@ -80,3 +80,5 @@ curl -X POST http://localhost:8080/api/send-text \
 - **Webhook** di `/webhook/incoming` untuk integrasi eksternal
 
 Semua endpoint siap digunakan! 🚀
+
+https://chat.deepseek.com/share/nrjr0a6xckpaapde06
