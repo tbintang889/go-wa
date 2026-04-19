@@ -311,6 +311,19 @@
         color: #666;
         font-size: 12px;
       }
+      .contact-last-message {
+        font-size: 12px;
+        color: #666;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .contact-time {
+        font-size: 10px;
+        color: #999;
+        margin-left: 8px;
+      }
     </style>
   </head>
   <body>
@@ -419,43 +432,46 @@
         };
 
         ws.onmessage = function (event) {
-    const data = JSON.parse(event.data);
-    console.log("WebSocket message:", data);
+          const data = JSON.parse(event.data);
+          console.log("WebSocket message:", data);
 
-    if (data.type === "new_message") {
-        const msg = data.message;
-        
-        // Cek apakah pesan dari kontak yang sedang aktif
-        const isCurrentChat = currentContact && (msg.from_jid === currentContact.jid || msg.to_jid === currentContact.jid);
-        
-        console.log("isCurrentChat:", isCurrentChat);
-        console.log("currentContact:", currentContact);
-        console.log("msg.from_jid:", msg.from_jid);
-        
-        if (isCurrentChat) {
-            // Jika sedang di chat yang sama, langsung tampilkan
-            addMessageToBottom(msg.content, msg.is_from_me);
-            totalMessages++;
-            console.log("✅ Added to current chat");
-        } else {
-            // Jika pesan dari chat lain, baru muncul notifikasi
-            console.log("🔔 New message from other chat!");
-            
-            unreadCount++;
-            updateTitleNotification(unreadCount);
-            
-            // Play suara (opsional)
-            // playNotificationSound();
-            
-            // Tampilkan notifikasi desktop
-            const senderName = msg.push_name || msg.from_jid.split('@')[0];
-            showDesktopNotification(senderName, msg.content);
-            
-            // Refresh kontak list untuk update last message
-            loadContacts();
-        }
-    }
-};
+          if (data.type === "new_message") {
+            const msg = data.message;
+
+            // Cek apakah pesan dari kontak yang sedang aktif
+            const isCurrentChat =
+              currentContact &&
+              (msg.from_jid === currentContact.jid ||
+                msg.to_jid === currentContact.jid);
+
+            console.log("isCurrentChat:", isCurrentChat);
+            console.log("currentContact:", currentContact);
+            console.log("msg.from_jid:", msg.from_jid);
+
+            if (isCurrentChat) {
+              // Jika sedang di chat yang sama, langsung tampilkan
+              addMessageToBottom(msg.content, msg.is_from_me);
+              totalMessages++;
+              console.log("✅ Added to current chat");
+            } else {
+              // Jika pesan dari chat lain, baru muncul notifikasi
+              console.log("🔔 New message from other chat!");
+
+              unreadCount++;
+              updateTitleNotification(unreadCount);
+
+              // Play suara (opsional)
+              // playNotificationSound();
+
+              // Tampilkan notifikasi desktop
+              const senderName = msg.push_name || msg.from_jid.split("@")[0];
+              showDesktopNotification(senderName, msg.content);
+
+              // Refresh kontak list untuk update last message
+              loadContacts();
+            }
+          }
+        };
 
         // Fungsi untuk update status pesan
         function updateMessageStatus(messageId, status, errorMsg) {
@@ -809,14 +825,14 @@
 
       function renderContacts() {
         const container = document.getElementById("contactsList");
-        const searchInput = document.getElementById("searchInput");
-        const searchTerm = searchInput?.value.toLowerCase() || "";
+        const searchTerm =
+          document.getElementById("searchInput")?.value.toLowerCase() || "";
 
+        // Contacts sudah terurut dari backend
         const filtered = contacts.filter(
           (c) =>
             c.name?.toLowerCase().includes(searchTerm) ||
-            c.number?.includes(searchTerm) ||
-            c.push_name?.toLowerCase().includes(searchTerm),
+            c.number?.toLowerCase().includes(searchTerm),
         );
 
         if (filtered.length === 0) {
@@ -826,23 +842,41 @@
 
         container.innerHTML = filtered
           .map((contact) => {
-            const displayName =
-              contact.push_name || contact.name || contact.number;
-            // Kirim JID asli, nanti dinormalisasi di selectContact
-            const contactJid = contact.jid;
+            const displayName = contact.name || contact.number;
+            const lastMessage = contact.last_message || "";
+            const lastTime = contact.last_message_time
+              ? formatMessageTime(contact.last_message_time)
+              : "";
+
             return `
-            <div class="contact-item" onclick="selectContact('${escapeHtml(contactJid)}', '${escapeHtml(displayName)}', '${escapeHtml(contact.number)}')">
+            <div class="contact-item" onclick="selectContact('${escapeHtml(contact.jid)}', '${escapeHtml(displayName)}', '${escapeHtml(contact.number)}')">
                 <div class="contact-avatar">${getInitials(displayName)}</div>
                 <div class="contact-info">
                     <div class="contact-name">${escapeHtml(displayName)}</div>
-                    <div class="contact-number">${escapeHtml(contact.number)}</div>
+                    <div class="contact-last-message">${escapeHtml(lastMessage.substring(0, 40))}</div>
                 </div>
+                <div class="contact-time">${lastTime}</div>
             </div>
         `;
           })
           .join("");
       }
 
+      function formatMessageTime(timestamp) {
+        if (!timestamp) return "";
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+
+        if (diff < 60 * 1000) return "Now";
+        if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}m`;
+        if (diff < 24 * 60 * 60 * 1000)
+          return date.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        return date.toLocaleDateString([], { day: "numeric", month: "short" });
+      }
       function checkStatus() {
         fetch("/api/status-full")
           .then((res) => res.json())

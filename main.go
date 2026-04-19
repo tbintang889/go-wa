@@ -329,46 +329,93 @@ func main() {
 	})
 
 	// var contactsSynced = false // Tambahkan flag global di awal
-
-	r.GET("/api/chats", func(c *gin.Context) {
-    // Ambil chat unik dari database messages
-    rows, err := database.DB.Query(`
-        SELECT DISTINCT from_jid FROM messages WHERE from_jid != to_jid AND content != ''
-        UNION 
-        SELECT DISTINCT to_jid FROM messages WHERE from_jid != to_jid AND content != ''
+	// Tambahkan di main.go
+	r.GET("/api/debug/chats", func(c *gin.Context) {
+		// Query paling sederhana
+		rows, err := database.DB.Query(`
+        SELECT DISTINCT from_jid FROM messages 
+        WHERE from_jid != '' AND from_jid != 'me'
+        UNION
+        SELECT DISTINCT to_jid FROM messages 
+        WHERE to_jid != '' AND to_jid != 'me'
     `)
-    if err != nil {
-        c.JSON(500, gin.H{"error": err.Error()})
-        return
-    }
-    defer rows.Close()
-    
-    chatList := []gin.H{}
-    for rows.Next() {
-        var jidStr string
-        if err := rows.Scan(&jidStr); err != nil {
-            continue
-        }
-        
-        // Parse JID untuk ambil nama
-        jid, err := types.ParseJID(jidStr)
-        name := jidStr
-        if err == nil {
-            contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
-            if err == nil && contact.PushName != "" {
-                name = contact.PushName
-            }
-        }
-        
-        chatList = append(chatList, gin.H{
-            "jid":    jidStr,
-            "name":   name,
-            "number": jidStr,
-        })
-    }
-    
-    c.JSON(200, chatList)
-})
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		var jids []string
+		for rows.Next() {
+			var jid string
+			rows.Scan(&jid)
+			if jid != "" {
+				jids = append(jids, jid)
+			}
+		}
+
+		c.JSON(200, gin.H{
+			"total": len(jids),
+			"jids":  jids,
+			"note":  "Raw JIDs from database",
+		})
+	})
+	r.GET("/api/chats", func(c *gin.Context) {
+		// Query sederhana yang sudah terbukti berhasil dari debug
+		rows, err := database.DB.Query(`
+        SELECT DISTINCT from_jid FROM messages 
+        WHERE from_jid != '' AND from_jid != 'me' AND from_jid != to_jid
+        UNION
+        SELECT DISTINCT to_jid FROM messages 
+        WHERE to_jid != '' AND to_jid != 'me' AND from_jid != to_jid
+    `)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		defer rows.Close()
+
+		chatList := []gin.H{}
+		for rows.Next() {
+			var jidStr string
+			if err := rows.Scan(&jidStr); err != nil {
+				continue
+			}
+
+			// Skip JID yang tidak valid
+			if jidStr == "" || jidStr == "me" {
+				continue
+			}
+
+			// Sederhanakan display name
+			displayName := jidStr
+			if strings.Contains(jidStr, "@s.whatsapp.net") {
+				displayName = strings.TrimSuffix(jidStr, "@s.whatsapp.net")
+			} else if strings.Contains(jidStr, "@lid") {
+				displayName = strings.TrimSuffix(jidStr, "@lid")
+			} else if strings.Contains(jidStr, ":") {
+				parts := strings.Split(jidStr, ":")
+				displayName = parts[0]
+			}
+
+			// Ambil push name dari WhatsApp store
+			jid, err := types.ParseJID(jidStr)
+			if err == nil {
+				contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
+				if err == nil && contact.PushName != "" {
+					displayName = contact.PushName
+				}
+			}
+
+			chatList = append(chatList, gin.H{
+				"jid":    jidStr,
+				"name":   displayName,
+				"number": jidStr,
+			})
+		}
+
+		c.JSON(200, chatList)
+	})
 	// Di main.go, pastikan ada endpoint ini
 	r.GET("/api/messages/:jid", func(c *gin.Context) {
 		jid := c.Param("jid")
