@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"gowa/database"
+	"gowa/handlers"
 	"gowa/routes"
 	"net/http"
 	"net/url"
@@ -194,7 +195,7 @@ func main() {
 	}
 
 	client = whatsmeow.NewClient(deviceStore, waLog.Stdout("Client", "DEBUG", true))
-
+	messageHandler := handlers.NewMessageHandler(client, broadcastMessage)
 	// ==================== EVENT HANDLER UNTUK PESAN MASUK ====================
 	/* 	client.AddEventHandler(func(evt interface{}) {
 		fmt.Printf("DEBUG: Event type: %T\n", evt) // CETAK SEMUA EVENT
@@ -241,113 +242,7 @@ func main() {
 		switch v := evt.(type) {
 
 		case *events.Message:
-			if v.Info.IsFromMe {
-				return
-			}
-
-			var content string
-			var mediaPath string
-
-			switch {
-			case v.Message.GetConversation() != "":
-				content = v.Message.GetConversation()
-
-			case v.Message.ExtendedTextMessage != nil:
-				content = v.Message.ExtendedTextMessage.GetText()
-
-			case v.Message.ImageMessage != nil:
-				img := v.Message.ImageMessage
-
-				// Buat direktori
-				err := os.MkdirAll("media/images", 0755)
-				if err != nil {
-					fmt.Println("Failed to create media dir:", err)
-					return
-				}
-
-				// Download gambar
-				data, err := client.Download(ctx, img)
-				if err != nil {
-					fmt.Println("Failed to download image:", err)
-					return
-				}
-
-				// Generate nama file unik
-				fileName := fmt.Sprintf("media/images/%d_%s.jpg",
-					time.Now().UnixNano(),
-					strings.ReplaceAll(v.Info.Sender.String(), "@", "_"))
-
-				// Simpan ke file
-				err = os.WriteFile(fileName, data, 0644)
-				if err != nil {
-					fmt.Println("Failed to save image:", err)
-					return
-				}
-
-				// Set content dan media path
-				caption := img.GetCaption()
-				if caption != "" {
-					content = fmt.Sprintf("📷 Image: %s", caption)
-				} else {
-					content = "📷 Image"
-				}
-				mediaPath = fileName
-
-				fmt.Printf("✅ Image saved: %s\n", fileName)
-
-			case v.Message.StickerMessage != nil:
-				content = "🎨 Sticker"
-
-			case v.Message.AudioMessage != nil:
-				content = "🎵 Voice note"
-
-			case v.Message.VideoMessage != nil:
-				content = "📹 Video"
-
-			default:
-				return
-			}
-
-			if content == "" {
-				return
-			}
-
-			// Tentukan JID penerima
-			senderJID := v.Info.Sender.String()
-			chatJID := v.Info.Chat.String()
-
-			if senderJID == chatJID {
-				botJID := client.Store.ID.String()
-				chatJID = botJID
-			}
-
-			// Simpan ke database dengan media_path
-			var err error
-			if mediaPath != "" {
-				err = database.SaveMessageWithMedia(senderJID, chatJID, content, mediaPath, false)
-			} else {
-				err = database.SaveMessage(senderJID, chatJID, content, false)
-			}
-
-			if err != nil {
-				fmt.Printf("Failed to save: %v\n", err)
-				return
-			}
-
-			fmt.Printf("✅ Message saved: %s\n", content)
-
-			// Broadcast ke WebSocket
-			broadcastMessage(map[string]interface{}{
-				"type": "new_message",
-				"message": map[string]interface{}{
-					"from_jid":   senderJID,
-					"to_jid":     chatJID,
-					"content":    content,
-					"media_path": mediaPath,
-					"is_from_me": false,
-					"timestamp":  v.Info.Timestamp,
-				},
-			})
+			messageHandler.HandleIncomingMessage(v)
 		case *events.HistorySync:
 			// JANGAN simpan history sync ke messages table
 			fmt.Printf("History sync received, ignoring: %d conversations\n", len(v.Data.GetConversations()))
