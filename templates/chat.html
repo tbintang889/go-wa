@@ -405,6 +405,7 @@
 
           if (data.type === "new_message") {
             const msg = data.message;
+            // Cek apakah pesan untuk kontak yang sedang aktif
             if (
               currentContact &&
               (msg.from_jid === currentContact.jid ||
@@ -413,8 +414,27 @@
               addMessageToBottom(msg.content, msg.is_from_me);
               totalMessages++;
             }
+          } else if (data.type === "message_status") {
+            // Update status pesan yang sudah terkirim
+            const statusData = data.data;
+            updateMessageStatus(
+              statusData.id,
+              statusData.status,
+              statusData.error,
+            );
+          } else if (data.type === "login_success") {
+            console.log("Login success, refreshing contacts...");
+            loadContacts();
           }
         };
+
+        // Fungsi untuk update status pesan
+        function updateMessageStatus(messageId, status, errorMsg) {
+          // Cari pesan dengan ID tersebut dan update icon status
+          const messages = document.querySelectorAll(".message");
+          // Note: perlu cara yang lebih baik untuk track message by ID
+          console.log(`Message ${messageId} status: ${status}`, errorMsg || "");
+        }
 
         ws.onerror = function (error) {
           console.error("WebSocket error:", error);
@@ -635,56 +655,37 @@
         loadMessages(true);
       }
 
-      window.sendMessage = async function () {
+      window.sendMessage = function () {
         const input = document.getElementById("messageInput");
         const text = input.value.trim();
 
         if (!currentContact?.number || !text) {
-          alert("Pilih kontak dan tulis pesan");
+          if (!currentContact?.number) alert("Pilih kontak dulu");
           return;
         }
 
+        // Langsung tampilkan di UI (optimistic update)
         addMessageToBottom(text, true);
         input.value = "";
 
-        try {
-          const response = await fetch("/api/send-message", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              to: currentContact.number,
-              text: text,
+        // Kirim via WebSocket
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "send_message",
+              data: {
+                to: currentContact.number,
+                text: text,
+              },
             }),
-          });
-
-          // Cek response status
-          if (!response.ok) {
-            const textResponse = await response.text();
-            console.error("Server error response:", textResponse);
-            throw new Error(
-              `HTTP ${response.status}: ${textResponse.substring(0, 100)}`,
-            );
-          }
-
-          // Cek content-type
-          const contentType = response.headers.get("content-type");
-          if (!contentType || !contentType.includes("application/json")) {
-            const textResponse = await response.text();
-            console.error("Non-JSON response:", textResponse);
-            throw new Error("Server returned non-JSON response");
-          }
-
-          const data = await response.json();
-          console.log("Response data:", data);
-
-          if (data.status === "sent") {
-            console.log("✅ Message sent");
-          } else {
-            alert("Gagal kirim: " + JSON.stringify(data));
-          }
-        } catch (err) {
-          console.error("Error:", err);
-          alert("Gagal kirim pesan: " + err.message);
+          );
+          console.log(
+            "✅ Message sent via WebSocket to:",
+            currentContact.number,
+          );
+        } else {
+          console.error("WebSocket not connected. State:", ws?.readyState);
+          alert("Koneksi WebSocket terputus, silakan refresh halaman");
         }
       };
       function escapeHtml(text) {
@@ -768,27 +769,29 @@
       }
 
       function renderContacts() {
-    const container = document.getElementById("contactsList");
-    const searchInput = document.getElementById("searchInput");
-    const searchTerm = searchInput?.value.toLowerCase() || "";
+        const container = document.getElementById("contactsList");
+        const searchInput = document.getElementById("searchInput");
+        const searchTerm = searchInput?.value.toLowerCase() || "";
 
-    const filtered = contacts.filter(
-        (c) =>
+        const filtered = contacts.filter(
+          (c) =>
             c.name?.toLowerCase().includes(searchTerm) ||
             c.number?.includes(searchTerm) ||
-            c.push_name?.toLowerCase().includes(searchTerm)
-    );
+            c.push_name?.toLowerCase().includes(searchTerm),
+        );
 
-    if (filtered.length === 0) {
-        container.innerHTML = '<div class="loading">No contacts found</div>';
-        return;
-    }
+        if (filtered.length === 0) {
+          container.innerHTML = '<div class="loading">No contacts found</div>';
+          return;
+        }
 
-    container.innerHTML = filtered.map((contact) => {
-        const displayName = contact.push_name || contact.name || contact.number;
-        // Kirim JID asli, nanti dinormalisasi di selectContact
-        const contactJid = contact.jid;
-        return `
+        container.innerHTML = filtered
+          .map((contact) => {
+            const displayName =
+              contact.push_name || contact.name || contact.number;
+            // Kirim JID asli, nanti dinormalisasi di selectContact
+            const contactJid = contact.jid;
+            return `
             <div class="contact-item" onclick="selectContact('${escapeHtml(contactJid)}', '${escapeHtml(displayName)}', '${escapeHtml(contact.number)}')">
                 <div class="contact-avatar">${getInitials(displayName)}</div>
                 <div class="contact-info">
@@ -797,8 +800,9 @@
                 </div>
             </div>
         `;
-    }).join("");
-}
+          })
+          .join("");
+      }
 
       function checkStatus() {
         fetch("/api/status-full")

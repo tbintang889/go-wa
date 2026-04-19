@@ -61,6 +61,7 @@ func broadcastMessage(message interface{}) {
 }
 
 // Handle WebSocket connection
+
 func handleWebSocket(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -85,28 +86,83 @@ func handleWebSocket(c *gin.Context) {
 			to := data["to"].(string)
 			text := data["text"].(string)
 
-			// Dapatkan JID bot sendiri
+			// Normalisasi nomor
+			if !strings.Contains(to, "@") {
+				to = to + "@s.whatsapp.net"
+			}
+
+			// Parse JID
+			jid, err := types.ParseJID(to)
+			if err != nil {
+				println("Invalid JID:", to)
+				continue
+			}
+
+			// Dapatkan JID bot
 			botJID := client.Store.ID.String()
 
-			// Parse JID tujuan
-			jid := types.JID{User: to, Server: "s.whatsapp.net"}
+			// Simpan ke database dengan status pending
+			result, err := database.DB.Exec(`
+                INSERT INTO messages (from_jid, to_jid, content, is_from_me, status, timestamp) 
+                VALUES (?, ?, ?, ?, 'pending', ?)
+            `, botJID, to, text, true, time.Now())
 
-			// Simpan ke database (from = bot, to = tujuan)
-			saveErr := database.SaveMessage(botJID, to, text, true)
-			if saveErr != nil {
-				println("Failed to save message:", saveErr.Error())
+			if err != nil {
+				println("Failed to save message:", err.Error())
+				continue
 			}
 
-			// Kirim ke WhatsApp
-			_, sendErr := client.SendMessage(context.Background(), jid, &waProto.Message{
-				Conversation: proto.String(text),
+			messageID, _ := result.LastInsertId()
+
+			// Broadcast ke semua client (termasuk pengirim)
+			broadcastMessage(map[string]interface{}{
+				"type": "new_message",
+				"message": map[string]interface{}{
+					"id":         messageID,
+					"from_jid":   botJID,
+					"to_jid":     to,
+					"content":    text,
+					"is_from_me": true,
+					"status":     "pending",
+					"timestamp":  time.Now(),
+				},
 			})
 
-			if sendErr != nil {
-				println("Failed to send message:", sendErr.Error())
-			} else {
-				println("Message sent to:", to)
-			}
+			// Kirim ke WhatsApp di background
+			go func(msgID int64, jid types.JID, toNum, msgText string) {
+				// Context dengan timeout 15 detik
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+
+				_, err := client.SendMessage(ctx, jid, &waProto.Message{
+					Conversation: proto.String(msgText),
+				})
+
+				if err != nil {
+					println("Failed to send to:", toNum, "-", err.Error())
+					database.UpdateMessageStatus(int(msgID), "failed")
+
+					broadcastMessage(map[string]interface{}{
+						"type": "message_status",
+						"data": map[string]interface{}{
+							"id":     msgID,
+							"status": "failed",
+							"error":  err.Error(),
+						},
+					})
+				} else {
+					println("Sent to:", toNum)
+					database.UpdateMessageStatus(int(msgID), "sent")
+
+					broadcastMessage(map[string]interface{}{
+						"type": "message_status",
+						"data": map[string]interface{}{
+							"id":     msgID,
+							"status": "sent",
+						},
+					})
+				}
+			}(messageID, jid, to, text)
 		}
 	}
 
@@ -114,7 +170,6 @@ func handleWebSocket(c *gin.Context) {
 	delete(wsClients, conn)
 	wsClientsMu.Unlock()
 }
-
 func main() {
 	ctx := context.Background()
 
@@ -517,34 +572,77 @@ func main() {
 			Text string `json:"text"`
 		}
 
-		// Parse JSON request
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Dapatkan JID bot sendiri
 		botJID := client.Store.ID.String()
-
-		// Parse JID tujuan
 		jid := types.JID{User: req.To, Server: "s.whatsapp.net"}
 
-		// Simpan ke database
-		if err := database.SaveMessage(botJID, req.To, req.Text, true); err != nil {
-			println("Failed to save message:", err.Error())
-		}
-
-		// Kirim ke WhatsApp
-		_, err := client.SendMessage(context.Background(), jid, &waProto.Message{
-			Conversation: proto.String(req.Text),
-		})
-
+		// Simpan ke database dengan status 'pending'
+		var messageID int64
+		query := `INSERT INTO messages (from_jid, to_jid, content, is_from_me, status, timestamp) 
+              VALUES (?, ?, ?, ?, 'pending', ?)`
+		result, err := database.DB.Exec(query, botJID, req.To, req.Text, true, time.Now())
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.JSON(500, gin.H{"error": "Failed to save message"})
 			return
 		}
+		messageID, _ = result.LastInsertId()
 
-		c.JSON(200, gin.H{"status": "sent"})
+		// Broadcast ke WebSocket
+		broadcastMessage(map[string]interface{}{
+			"type": "new_message",
+			"message": map[string]interface{}{
+				"id":         messageID,
+				"from_jid":   botJID,
+				"to_jid":     req.To,
+				"content":    req.Text,
+				"is_from_me": true,
+				"status":     "pending",
+				"timestamp":  time.Now(),
+			},
+		})
+
+		// Kirim ke WhatsApp di background
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			_, err := client.SendMessage(ctx, jid, &waProto.Message{
+				Conversation: proto.String(req.Text),
+			})
+
+			if err != nil {
+				println("Failed to send message:", err.Error())
+				database.UpdateMessageStatus(int(messageID), "failed")
+
+				// Broadcast status update
+				broadcastMessage(map[string]interface{}{
+					"type": "message_status",
+					"data": map[string]interface{}{
+						"id":     messageID,
+						"status": "failed",
+						"error":  err.Error(),
+					},
+				})
+			} else {
+				println("Message sent to:", req.To)
+				database.UpdateMessageStatus(int(messageID), "sent")
+
+				// Broadcast status update
+				broadcastMessage(map[string]interface{}{
+					"type": "message_status",
+					"data": map[string]interface{}{
+						"id":     messageID,
+						"status": "sent",
+					},
+				})
+			}
+		}()
+
+		c.JSON(200, gin.H{"status": "pending", "id": messageID, "message": "Message saved, sending in background"})
 	})
 	routes.WaRoutes(r, client)
 	r.LoadHTMLGlob("templates/*")
@@ -575,6 +673,7 @@ func main() {
 		println("Server running at http://localhost:8080")
 		time.Sleep(2 * time.Second)
 		openBrowser("http://localhost:8080")
+		retryPendingMessages()
 	}()
 
 	r.Run(":8080")
@@ -594,3 +693,30 @@ func openBrowser(url string) {
 		println("Failed to open browser:", err.Error())
 	}
 }
+
+// Background worker untuk retry pesan yang gagal
+func retryPendingMessages() {
+	ticker := time.NewTicker(30 * time.Second)
+	for range ticker.C {
+		messages, err := database.GetPendingMessages()
+		if err != nil {
+			continue
+		}
+
+		for _, msg := range messages {
+			println("Retrying message:", msg.ID)
+
+			jid := types.JID{User: msg.ToJID, Server: "s.whatsapp.net"}
+			_, err := client.SendMessage(context.Background(), jid, &waProto.Message{
+				Conversation: proto.String(msg.Content),
+			})
+
+			if err == nil {
+				database.UpdateMessageStatus(msg.ID, "sent")
+				println("Retry success:", msg.ID)
+			}
+		}
+	}
+}
+
+// Di main.go, jalankan worker
