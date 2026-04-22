@@ -10,6 +10,7 @@ import (
 
 var DB *sql.DB
 
+// InitDB - inisialisasi database dengan auto migrasi
 func InitDB(dbPath string) error {
     var err error
     DB, err = sql.Open("sqlite", dbPath+"?_timeout=5000&_busy_timeout=5000")
@@ -19,7 +20,7 @@ func InitDB(dbPath string) error {
     
     DB.SetMaxOpenConns(1)
     
-    // Buat tabel dengan kolom status
+    // Buat tabel messages
     createTableSQL := `
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,6 +28,7 @@ func InitDB(dbPath string) error {
         to_jid TEXT NOT NULL,
         content TEXT,
         media_path TEXT,
+        media_type TEXT,
         is_from_me BOOLEAN DEFAULT 0,
         status TEXT DEFAULT 'pending',
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -43,31 +45,40 @@ func InitDB(dbPath string) error {
         return err
     }
     
-    // Cek apakah kolom status sudah ada (untuk database lama)
-    var hasStatus int
-    DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'status'").Scan(&hasStatus)
-    
-    if hasStatus == 0 {
-        _, err = DB.Exec("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'pending'")
+    // Cek dan tambahkan kolom media_type jika belum ada
+    var hasMediaType int
+    DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'media_type'").Scan(&hasMediaType)
+    if hasMediaType == 0 {
+        _, err = DB.Exec("ALTER TABLE messages ADD COLUMN media_type TEXT")
         if err != nil {
             return err
         }
-        println("✅ Added status column to messages table")
+        println("✅ Added media_type column")
     }
     
-    // Cek apakah kolom media_path sudah ada
+    // Cek dan tambahkan kolom media_path jika belum ada
     var hasMediaPath int
     DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'media_path'").Scan(&hasMediaPath)
-    
     if hasMediaPath == 0 {
         _, err = DB.Exec("ALTER TABLE messages ADD COLUMN media_path TEXT")
         if err != nil {
             return err
         }
-        println("✅ Added media_path column to messages table")
+        println("✅ Added media_path column")
     }
     
-    return err
+    // Cek dan tambahkan kolom status jika belum ada
+    var hasStatus int
+    DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'status'").Scan(&hasStatus)
+    if hasStatus == 0 {
+        _, err = DB.Exec("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'pending'")
+        if err != nil {
+            return err
+        }
+        println("✅ Added status column")
+    }
+    
+    return nil
 }
 
 // Update struct Message
@@ -77,8 +88,9 @@ type Message struct {
     ToJID     string    `json:"to_jid"`
     Content   string    `json:"content"`
     MediaPath string    `json:"media_path,omitempty"`
+    MediaType string    `json:"media_type,omitempty"`
     IsFromMe  bool      `json:"is_from_me"`
-    Status    string    `json:"status"`  // pending, sent, failed
+    Status    string    `json:"status"`
     Timestamp time.Time `json:"timestamp"`
 }
 
@@ -91,13 +103,14 @@ func SaveMessage(fromJID, toJID, content string, isFromMe bool) error {
 }
 
 // SaveMessageWithMedia - untuk pesan dengan media
-func SaveMessageWithMedia(fromJID, toJID, content, mediaPath string, isFromMe bool) error {
-    query := `INSERT INTO messages (from_jid, to_jid, content, media_path, is_from_me, status, timestamp) 
-              VALUES (?, ?, ?, ?, ?, 'pending', ?)`
-    _, err := DB.Exec(query, fromJID, toJID, content, mediaPath, isFromMe, time.Now())
+// SaveMessageWithMedia - untuk pesan dengan media
+// SaveMessageWithMedia - untuk pesan dengan media
+func SaveMessageWithMedia(fromJID, toJID, content, mediaPath, mediaType string, isFromMe bool) error {
+    query := `INSERT INTO messages (from_jid, to_jid, content, media_path, media_type, is_from_me, status, timestamp) 
+              VALUES (?, ?, ?, ?, ?, ?, 'sent', ?)`
+    _, err := DB.Exec(query, fromJID, toJID, content, mediaPath, mediaType, isFromMe, time.Now())
     return err
 }
-
 // UpdateMessageStatus - update status pesan
 func UpdateMessageStatus(id int, status string) error {
     query := `UPDATE messages SET status = ? WHERE id = ?`
