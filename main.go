@@ -124,15 +124,20 @@ func main() {
 
 	messageHandler := handlers.NewMessageHandler(client, broadcastMessage)
 	client.AddEventHandler(func(evt interface{}) {
-		switch v := evt.(type) {
-		case *events.Message:
-			messageHandler.HandleIncomingMessage(v)
-		case *events.HistorySync:
-			fmt.Printf("History sync ignored: %d conversations\n", len(v.Data.GetConversations()))
-		case *events.PushName:
-			fmt.Printf("PushName update ignored: %s -> %s\n", v.JID, v.NewPushName)
-		}
-	})
+	fmt.Printf("🔥 RAW EVENT TYPE: %T\n", evt) // HARUSNYA muncul *events.Message
+	
+	switch v := evt.(type) {
+	case *events.Message:
+		fmt.Printf("🔥 MESSAGE FROM: %s\n", v.Info.Sender)
+		messageHandler.HandleIncomingMessage(v)
+	case *events.HistorySync:
+		fmt.Printf("History sync ignored: %d conversations\n", len(v.Data.GetConversations()))
+	case *events.PushName:
+		fmt.Printf("PushName update: %s -> %s\n", v.JID, v.NewPushName)
+	default:
+		fmt.Printf("Unhandled event: %T\n", evt)
+	}
+})
 
 	qrChan, _ := client.GetQRChannel(ctx)
 	go func() {

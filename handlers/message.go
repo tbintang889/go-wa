@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
-
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -26,62 +24,74 @@ func NewMessageHandler(client *whatsmeow.Client, broadcastFunc func(interface{})
 }
 
 func (h *MessageHandler) HandleIncomingMessage(v *events.Message) {
-	if v.Info.IsFromMe {
-		return
-	}
+	// Log semua pesan masuk untuk debug
+	fmt.Printf("📨 [DEBUG] Message received. IsFromMe: %v, Sender: %s, Chat: %s\n", 
+		v.Info.IsFromMe, v.Info.Sender, v.Info.Chat)
+	
+	// JANGAN skip pesan dari diri sendiri dulu, biar keliatan
+	// if v.Info.IsFromMe {
+	// 	fmt.Println("⏭️ Skip: message from self")
+	// 	return
+	// }
+	
+	// Deteksi jenis chat
 	chatType := utils.DetectChatType(v.Info.Chat)
-	switch chatType {
-	case "PRIVATE":
-		h.handlePrivateChat(v)
-	case "GROUP":
-		h.handleGroupChat(v)
-	default:
-		fmt.Printf("⏭️ Skipping: %s\n", chatType)
-	}
-}
-
-func (h *MessageHandler) handlePrivateChat(v *events.Message) {
+	fmt.Printf("📨 [DEBUG] ChatType: %s\n", chatType)
+	
+	// Ekstrak konten
 	content := utils.ExtractMessageContent(v.Message)
+	fmt.Printf("📨 [DEBUG] Content: '%s'\n", content)
+	
 	if content == "" {
+		fmt.Println("⏭️ Skip: empty content")
 		return
 	}
-	botJID := h.Client.Store.ID.String()
+	
+	// SIMPAN SEMUA PESAN (termasuk dari diri sendiri untuk test)
 	senderJID := v.Info.Sender.String()
 	chatJID := v.Info.Chat.String()
-	if senderJID == chatJID {
+	
+	// Untuk personal chat, pastikan dari_jid dan to_jid berbeda
+	botJID := h.Client.Store.ID.String()
+	if senderJID == chatJID && chatType == "PRIVATE" {
 		chatJID = botJID
 	}
-	err := database.SaveMessage(senderJID, chatJID, content, false)
+	
+	// Simpan ke database
+	err := database.SaveMessage(senderJID, chatJID, content, v.Info.IsFromMe)
 	if err != nil {
-		fmt.Printf("Failed to save private message: %v\n", err)
+		fmt.Printf("❌ Failed to save message: %v\n", err)
 		return
 	}
-	fmt.Printf("✅ [PRIVATE] %s: %s\n", senderJID, content)
+	
+	fmt.Printf("✅ Message saved: [%s] %s -> %s: %s\n", chatType, senderJID, chatJID, content)
+	
+	// Ambil push name
 	pushName := h.getPushName(v.Info.Sender)
 	if pushName == "" {
 		pushName = strings.Split(senderJID, "@")[0]
 	}
-	h.broadcastMessage(senderJID, chatJID, content, false, v.Info.Timestamp, "PRIVATE", pushName, "")
-}
-
-func (h *MessageHandler) handleGroupChat(v *events.Message) {
-	content := utils.ExtractMessageContent(v.Message)
-	if content == "" {
-		return
+	
+	// Broadcast ke WebSocket (hanya jika bukan dari diri sendiri atau tetap broadcast)
+	if h.BroadcastFunc != nil {
+		msg := map[string]interface{}{
+			"type": "new_message",
+			"message": map[string]interface{}{
+				"from_jid":   senderJID,
+				"to_jid":     chatJID,
+				"content":    content,
+				"is_from_me": v.Info.IsFromMe,
+				"timestamp":  v.Info.Timestamp,
+				"chat_type":  chatType,
+				"push_name":  pushName,
+			},
+		}
+		if chatType == "GROUP" {
+			msg["message"].(map[string]interface{})["sender_jid"] = senderJID
+			msg["message"].(map[string]interface{})["sender_name"] = pushName
+		}
+		h.BroadcastFunc(msg)
 	}
-	senderJID := v.Info.Sender.String()
-	groupJID := v.Info.Chat.String()
-	err := database.SaveMessage(senderJID, groupJID, content, false)
-	if err != nil {
-		fmt.Printf("Failed to save group message: %v\n", err)
-		return
-	}
-	fmt.Printf("✅ [GROUP] %s in %s: %s\n", senderJID, groupJID, content)
-	pushName := h.getPushName(v.Info.Sender)
-	if pushName == "" {
-		pushName = strings.Split(senderJID, "@")[0]
-	}
-	h.broadcastMessage(senderJID, groupJID, content, false, v.Info.Timestamp, "GROUP", pushName, senderJID)
 }
 
 func (h *MessageHandler) getPushName(sender types.JID) string {
@@ -90,27 +100,4 @@ func (h *MessageHandler) getPushName(sender types.JID) string {
 		return contact.PushName
 	}
 	return ""
-}
-
-func (h *MessageHandler) broadcastMessage(fromJID, toJID, content string, isFromMe bool, timestamp time.Time, chatType, pushName, senderJID string) {
-	if h.BroadcastFunc == nil {
-		return
-	}
-	msg := map[string]interface{}{
-		"type": "new_message",
-		"message": map[string]interface{}{
-			"from_jid":   fromJID,
-			"to_jid":     toJID,
-			"content":    content,
-			"is_from_me": isFromMe,
-			"timestamp":  timestamp,
-			"chat_type":  chatType,
-			"push_name":  pushName,
-		},
-	}
-	if chatType == "GROUP" {
-		msg["message"].(map[string]interface{})["sender_jid"] = senderJID
-		msg["message"].(map[string]interface{})["sender_name"] = pushName
-	}
-	h.BroadcastFunc(msg)
 }
