@@ -1,15 +1,16 @@
 package handlers
 
 import (
-	"context" // ← Tambahkan ini
+	"context"
 	"fmt"
+		"go.mau.fi/whatsmeow/types"
+"time"
 	"strings"
 
 	"gowa/database"
 	"gowa/utils"
 
 	"go.mau.fi/whatsmeow"
-
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -25,120 +26,96 @@ func NewMessageHandler(client *whatsmeow.Client, broadcastFunc func(interface{})
 	}
 }
 
-// HandleIncomingMessage - fungsi utama untuk menangani pesan masuk
 func (h *MessageHandler) HandleIncomingMessage(v *events.Message) {
 	if v.Info.IsFromMe {
 		return
 	}
-
-	// Deteksi jenis chat dari JID
-	chatType := utils.DetectChatType(v.Info.Chat) // ← chatType didefinisikan di sini
-
+	chatType := utils.DetectChatType(v.Info.Chat)
 	switch chatType {
 	case "PRIVATE":
-		h.handlePrivateChat(v, chatType)
+		h.handlePrivateChat(v)
 	case "GROUP":
-		h.handleGroupChat(v, chatType)
+		h.handleGroupChat(v)
 	default:
 		fmt.Printf("⏭️ Skipping: %s\n", chatType)
-		return
 	}
 }
 
-// handlePrivateChat - penanganan chat pribadi
-func (h *MessageHandler) handlePrivateChat(v *events.Message, chatType string) {
+func (h *MessageHandler) handlePrivateChat(v *events.Message) {
 	content := utils.ExtractMessageContent(v.Message)
 	if content == "" {
 		return
 	}
-
 	botJID := h.Client.Store.ID.String()
 	senderJID := v.Info.Sender.String()
 	chatJID := v.Info.Chat.String()
-
 	if senderJID == chatJID {
 		chatJID = botJID
 	}
-
-	// Simpan ke database
 	err := database.SaveMessage(senderJID, chatJID, content, false)
 	if err != nil {
 		fmt.Printf("Failed to save private message: %v\n", err)
 		return
 	}
-
 	fmt.Printf("✅ [PRIVATE] %s: %s\n", senderJID, content)
 
-	// Ambil push name
-	pushName := ""
-	contact, err := h.Client.Store.Contacts.GetContact(context.Background(), v.Info.Sender)
-	if err == nil && contact.PushName != "" {
-		pushName = contact.PushName
-	}
+	pushName := h.getPushName(v.Info.Sender)
 	if pushName == "" {
 		pushName = strings.Split(senderJID, "@")[0]
 	}
 
-	// Broadcast ke WebSocket
-	if h.BroadcastFunc != nil {
-		h.BroadcastFunc(map[string]interface{}{
-			"type": "new_message",
-			"message": map[string]interface{}{
-				"from_jid":   senderJID,
-				"to_jid":     chatJID,
-				"content":    content,
-				"is_from_me": false,
-				"timestamp":  v.Info.Timestamp,
-				"chat_type":  chatType,
-				"push_name":  pushName,
-			},
-		})
-	}
+	h.broadcastMessage(senderJID, chatJID, content, false, v.Info.Timestamp, "PRIVATE", pushName, "")
 }
 
-// handleGroupChat - penanganan chat grup
-func (h *MessageHandler) handleGroupChat(v *events.Message, chatType string) {
+func (h *MessageHandler) handleGroupChat(v *events.Message) {
 	content := utils.ExtractMessageContent(v.Message)
 	if content == "" {
 		return
 	}
-
 	senderJID := v.Info.Sender.String()
 	groupJID := v.Info.Chat.String()
-
-	// Simpan ke database
 	err := database.SaveMessage(senderJID, groupJID, content, false)
 	if err != nil {
 		fmt.Printf("Failed to save group message: %v\n", err)
 		return
 	}
-
 	fmt.Printf("✅ [GROUP] %s in %s: %s\n", senderJID, groupJID, content)
 
-	// Ambil push name
-	pushName := ""
-	contact, err := h.Client.Store.Contacts.GetContact(context.Background(), v.Info.Sender)
-	if err == nil && contact.PushName != "" {
-		pushName = contact.PushName
-	}
+	pushName := h.getPushName(v.Info.Sender)
 	if pushName == "" {
 		pushName = strings.Split(senderJID, "@")[0]
 	}
+	// Untuk grup, kita kirim juga sender JID agar client bisa menampilkan nama pengirim
+	h.broadcastMessage(senderJID, groupJID, content, false, v.Info.Timestamp, "GROUP", pushName, senderJID)
+}
 
-	// Broadcast ke WebSocket
-	if h.BroadcastFunc != nil {
-		h.BroadcastFunc(map[string]interface{}{
-			"type": "new_message",
-			"message": map[string]interface{}{
-				"from_jid":   senderJID,
-				"to_jid":     groupJID,
-				"content":    content,
-				"is_from_me": false,
-				"timestamp":  v.Info.Timestamp,
-				"chat_type":  chatType,
-				"push_name":  pushName,
-				"is_group":   true,
-			},
-		})
+func (h *MessageHandler) getPushName(sender types.JID) string {
+	contact, err := h.Client.Store.Contacts.GetContact(context.Background(), sender)
+	if err == nil && contact.PushName != "" {
+		return contact.PushName
 	}
+	return ""
+}
+
+func (h *MessageHandler) broadcastMessage(fromJID, toJID, content string, isFromMe bool, timestamp time.Time, chatType, pushName, senderJID string) {
+	if h.BroadcastFunc == nil {
+		return
+	}
+	msg := map[string]interface{}{
+		"type": "new_message",
+		"message": map[string]interface{}{
+			"from_jid":   fromJID,
+			"to_jid":     toJID,
+			"content":    content,
+			"is_from_me": isFromMe,
+			"timestamp":  timestamp,
+			"chat_type":  chatType,
+			"push_name":  pushName,
+		},
+	}
+	if chatType == "GROUP" {
+		msg["message"].(map[string]interface{})["sender_jid"] = senderJID
+		msg["message"].(map[string]interface{})["sender_name"] = pushName
+	}
+	h.BroadcastFunc(msg)
 }
