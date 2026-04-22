@@ -306,11 +306,15 @@
       }
 
       .loading-indicator {
-        text-align: center;
-        padding: 10px;
-        color: #666;
-        font-size: 12px;
-      }
+    text-align: center;
+    padding: 10px;
+    color: #666;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 20px;
+    margin: 5px auto;
+    width: fit-content;
+}
       .contact-last-message {
         font-size: 12px;
         color: #666;
@@ -482,89 +486,98 @@
         };
       }
       // Update loadMessages - gunakan normalizedJid untuk query
-      async function loadMessages(reset = true) {
-        if (!currentContact) return;
-
-        if (reset) {
-          currentPage = 1;
-          hasMore = true;
-          document.getElementById("messagesArea").innerHTML = "";
+      // Load messages dengan pagination
+async function loadMessages(reset = true) {
+    if (!currentContact) return;
+    
+    if (reset) {
+        currentPage = 1;
+        hasMore = true;
+        document.getElementById("messagesArea").innerHTML = "";
+        scrollPosition = 0;
+    }
+    
+    if (isLoading || !hasMore) return;
+    
+    isLoading = true;
+    showLoadingIndicator();
+    
+    try {
+        const queryJid = currentContact.normalizedJid || currentContact.jid;
+        const response = await fetch(`/api/messages/${encodeURIComponent(queryJid)}?page=${currentPage}`);
+        const data = await response.json();
+        
+        totalMessages = data.total || 0;
+        hasMore = data.has_more || false;
+        const messages = data.messages || [];
+        
+        if (messages.length > 0) {
+            if (reset) {
+                // First load: replace all
+                renderMessages(messages, false);
+                // Scroll ke bawah
+                const container = document.getElementById("messagesArea");
+                container.scrollTop = container.scrollHeight;
+            } else {
+                // Load older: tambahkan di atas
+                const oldScrollHeight = document.getElementById("messagesArea").scrollHeight;
+                renderMessages(messages, true);
+                // Maintain scroll position
+                const newScrollHeight = document.getElementById("messagesArea").scrollHeight;
+                document.getElementById("messagesArea").scrollTop = newScrollHeight - oldScrollHeight + 50;
+            }
+        } else if (currentPage === 1 && messages.length === 0) {
+            document.getElementById("messagesArea").innerHTML = '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
         }
-
-        if (isLoading || !hasMore) return;
-
-        isLoading = true;
-        showLoadingIndicator();
-
-        try {
-          // Gunakan normalizedJid untuk query API
-          const queryJid = currentContact.normalizedJid || currentContact.jid;
-          const response = await fetch(
-            `/api/messages/${encodeURIComponent(queryJid)}?page=${currentPage}`,
-          );
-          const data = await response.json();
-
-          totalMessages = data.total || 0;
-          hasMore = data.has_more || false;
-
-          const messages = data.messages || [];
-
-          if (messages.length > 0) {
-            renderMessages(messages, reset);
-          } else if (currentPage === 1) {
-            document.getElementById("messagesArea").innerHTML =
-              '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
-          }
-        } catch (err) {
-          console.error("Error loading messages:", err);
-          if (currentPage === 1) {
-            document.getElementById("messagesArea").innerHTML =
-              '<div class="empty-state"><p>Error loading messages</p></div>';
-          }
-        } finally {
-          isLoading = false;
-          removeLoadingIndicator();
+    } catch (err) {
+        console.error("Error loading messages:", err);
+        if (currentPage === 1) {
+            document.getElementById("messagesArea").innerHTML = '<div class="empty-state"><p>Error loading messages</p></div>';
         }
-      }
-      function renderMessages(messages, appendToTop = false) {
-        const container = document.getElementById("messagesArea");
-        if (container.querySelector(".empty-state")) container.innerHTML = "";
+    } finally {
+        isLoading = false;
+        removeLoadingIndicator();
+    }
+}
 
-        // Filter pesan valid
-        const validMessages = messages.filter(
-          (msg) => msg.from_jid !== msg.to_jid && msg.content !== "",
-        );
-
-        if (validMessages.length === 0 && !appendToTop) {
-          if (currentPage === 1) {
-            container.innerHTML =
-              '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
-          }
-          return;
+      
+      // Render messages
+function renderMessages(messages, appendToTop = false) {
+    const container = document.getElementById("messagesArea");
+    
+    // Filter pesan valid
+    const validMessages = messages.filter((msg) => msg.from_jid !== msg.to_jid && msg.content !== "");
+    
+    if (validMessages.length === 0 && !appendToTop) {
+        if (currentPage === 1) {
+            container.innerHTML = '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
         }
-
-        const tempDiv = document.createElement("div");
-        validMessages.forEach((msg) => {
-          // Pastikan msg memiliki chat_type
-          if (!msg.chat_type && msg.to_jid && msg.to_jid.includes("@g.us")) {
+        return;
+    }
+    
+    const tempDiv = document.createElement("div");
+    validMessages.forEach((msg) => {
+        if (!msg.chat_type && msg.to_jid && msg.to_jid.includes("@g.us")) {
             msg.chat_type = "GROUP";
-          }
-          const messageDiv = createMessageElement(msg);
-          tempDiv.appendChild(messageDiv);
-        });
-
-        if (appendToTop) {
-          const firstChild = container.firstChild;
-          while (tempDiv.firstChild)
-            container.insertBefore(tempDiv.firstChild, firstChild);
-          if (container.firstChild)
-            container.scrollTop = container.firstChild.offsetHeight;
-        } else {
-          container.innerHTML = "";
-          while (tempDiv.firstChild) container.appendChild(tempDiv.firstChild);
-          container.scrollTop = container.scrollHeight;
         }
-      }
+        const messageDiv = createMessageElement(msg);
+        tempDiv.appendChild(messageDiv);
+    });
+    
+    if (appendToTop) {
+        // Tambahkan di ATAS (untuk older messages)
+        const firstChild = container.firstChild;
+        while (tempDiv.firstChild) {
+            container.insertBefore(tempDiv.firstChild, firstChild);
+        }
+    } else {
+        // Replace semua pesan (first load)
+        container.innerHTML = "";
+        while (tempDiv.firstChild) {
+            container.appendChild(tempDiv.firstChild);
+        }
+    }
+}
 
       // Update addMessageToBottom
       function addMessageToBottom(
@@ -673,32 +686,34 @@
         if (num === "" || num === jid) return "Unknown";
         return num;
       }
-      function handleScroll() {
-        const container = document.getElementById("messagesArea");
-        if (!container || isLoading || !hasMore) return;
+     // Load older messages saat scroll ke atas
+function handleScroll() {
+    const container = document.getElementById("messagesArea");
+    if (!container || isLoading || !hasMore) return;
+    
+    // Jika scroll ke atas (top threshold 100px)
+    if (container.scrollTop <= 100) {
+        currentPage++;
+        loadMessages(false); // false = append to top
+    }
+}
+// Show loading indicator di atas
+function showLoadingIndicator() {
+    const container = document.getElementById("messagesArea");
+    let loader = document.getElementById("scrollLoader");
+    if (!loader) {
+        loader = document.createElement("div");
+        loader.id = "scrollLoader";
+        loader.className = "loading-indicator";
+        loader.innerHTML = "Loading older messages...";
+        container.insertBefore(loader, container.firstChild);
+    }
+}
 
-        if (container.scrollTop <= 100) {
-          currentPage++;
-          loadMessages(false);
-        }
-      }
-
-      function showLoadingIndicator() {
-        const container = document.getElementById("messagesArea");
-        let loader = document.getElementById("scrollLoader");
-        if (!loader) {
-          loader = document.createElement("div");
-          loader.id = "scrollLoader";
-          loader.className = "loading-indicator";
-          loader.innerHTML = "Loading older messages...";
-          container.insertBefore(loader, container.firstChild);
-        }
-      }
-
-      function removeLoadingIndicator() {
-        const loader = document.getElementById("scrollLoader");
-        if (loader) loader.remove();
-      }
+    function removeLoadingIndicator() {
+    const loader = document.getElementById("scrollLoader");
+    if (loader) loader.remove();
+}
 
       // Update selectContact - simpan kedua format JID
       function selectContact(jid, name, number) {
