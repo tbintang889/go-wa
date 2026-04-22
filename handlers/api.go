@@ -9,18 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/gin-gonic/gin"
 	"go.mau.fi/whatsmeow"
-		"go.mau.fi/whatsmeow/types"
-	
+		waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 	"gowa/database"
 	"gowa/utils"
 )
 
-// GetQRHandler menangani permintaan QR code
 func GetQRHandler(client *whatsmeow.Client, qrCode *string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if client.IsLoggedIn() {
@@ -35,7 +32,6 @@ func GetQRHandler(client *whatsmeow.Client, qrCode *string) gin.HandlerFunc {
 	}
 }
 
-// GetStatusFullHandler mengembalikan status lengkap
 func GetStatusFullHandler(client *whatsmeow.Client, qrCode *string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -45,32 +41,16 @@ func GetStatusFullHandler(client *whatsmeow.Client, qrCode *string) gin.HandlerF
 		})
 	}
 }
-
-// GetChatsHandler mengembalikan daftar chat diurutkan berdasarkan pesan terbaru
 func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Query dengan last message time
-		query := `
-			SELECT 
-				jid,
-				MAX(timestamp) as last_time,
-				(
-					SELECT content FROM messages m2 
-					WHERE (m2.from_jid = jid OR m2.to_jid = jid) 
-					AND m2.from_jid != m2.to_jid
-					AND m2.content != ''
-					ORDER BY m2.timestamp DESC LIMIT 1
-				) as last_msg
-			FROM (
-				SELECT from_jid as jid, timestamp FROM messages WHERE from_jid != to_jid AND content != ''
-				UNION
-				SELECT to_jid as jid, timestamp FROM messages WHERE from_jid != to_jid AND content != ''
-			)
-			WHERE jid != '' AND jid != 'me'
-			GROUP BY jid
-			ORDER BY last_time DESC
-		`
-		rows, err := database.DB.Query(query)
+		// Query super simple: ambil semua JID unik
+		rows, err := database.DB.Query(`
+			SELECT DISTINCT from_jid FROM messages 
+			WHERE from_jid != '' AND from_jid != 'me' AND from_jid != to_jid
+			UNION
+			SELECT DISTINCT to_jid FROM messages 
+			WHERE to_jid != '' AND to_jid != 'me' AND from_jid != to_jid
+		`)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
@@ -79,24 +59,22 @@ func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 
 		chatList := []gin.H{}
 		for rows.Next() {
-			var jidStr, lastMsg string
-			var lastTime time.Time
-			if err := rows.Scan(&jidStr, &lastTime, &lastMsg); err != nil {
+			var jidStr string
+			rows.Scan(&jidStr)
+			if jidStr == "" || jidStr == "me" {
 				continue
 			}
-
-			// Sederhanakan display name
+			
+			// Bersihkan JID untuk display
 			displayName := jidStr
-			if strings.Contains(jidStr, "@s.whatsapp.net") {
-				displayName = strings.TrimSuffix(jidStr, "@s.whatsapp.net")
-			} else if strings.Contains(jidStr, "@lid") {
-				displayName = strings.TrimSuffix(jidStr, "@lid")
-			} else if strings.Contains(jidStr, ":") {
-				parts := strings.Split(jidStr, ":")
-				displayName = parts[0]
+			if strings.Contains(jidStr, ":") {
+				displayName = strings.Split(jidStr, ":")[0]
 			}
-
-			// Ambil push name dari WhatsApp store
+			if strings.Contains(displayName, "@") {
+				displayName = strings.Split(displayName, "@")[0]
+			}
+			
+			// Push name (optional, tidak ambil last message biar cepat)
 			jid, err := types.ParseJID(jidStr)
 			if err == nil {
 				contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
@@ -104,20 +82,17 @@ func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 					displayName = contact.PushName
 				}
 			}
-
+			
 			chatList = append(chatList, gin.H{
-				"jid":               jidStr,
-				"name":              displayName,
-				"number":            jidStr,
-				"last_message":      lastMsg,
-				"last_message_time": lastTime,
+				"jid":    jidStr,
+				"name":   displayName,
+				"number": jidStr,
 			})
 		}
+		
 		c.JSON(200, chatList)
 	}
 }
-
-// GetMessagesHandler menampilkan pesan per JID dengan pagination
 func GetMessagesHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		jidParam := c.Param("jid")
@@ -149,7 +124,6 @@ func GetMessagesHandler() gin.HandlerFunc {
 			}
 			messages = append(messages, msg)
 		}
-		// Balik urutan jadi ascending
 		for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
 			messages[i], messages[j] = messages[j], messages[i]
 		}
@@ -168,7 +142,6 @@ func GetMessagesHandler() gin.HandlerFunc {
 	}
 }
 
-// SendMessageHandler mengirim pesan via HTTP (alternatif)
 func SendMessageHandler(client *whatsmeow.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -196,7 +169,6 @@ func SendMessageHandler(client *whatsmeow.Client) gin.HandlerFunc {
 			return
 		}
 		messageID, _ := result.LastInsertId()
-		// Kirim di background
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
@@ -210,7 +182,6 @@ func SendMessageHandler(client *whatsmeow.Client) gin.HandlerFunc {
 	}
 }
 
-// GetMediaHandler menampilkan file media
 func GetMediaHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -228,7 +199,6 @@ func GetMediaHandler() gin.HandlerFunc {
 	}
 }
 
-// GetRoutesHandler menampilkan semua route
 func GetRoutesHandler(r *gin.Engine) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		routes := []gin.H{}
@@ -244,7 +214,6 @@ func GetRoutesHandler(r *gin.Engine) gin.HandlerFunc {
 	}
 }
 
-// DebugChatsHandler untuk debugging
 func DebugChatsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := database.DB.Query(`SELECT DISTINCT from_jid FROM messages WHERE from_jid != '' AND from_jid != 'me' UNION SELECT DISTINCT to_jid FROM messages WHERE to_jid != '' AND to_jid != 'me'`)

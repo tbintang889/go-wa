@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -26,6 +25,7 @@ import (
 	"gowa/handlers"
 	"gowa/routes"
 	"gowa/utils"
+	"net/http"
 	"strings"
 )
 
@@ -156,7 +156,6 @@ func main() {
 		panic(err)
 	}
 
-	// Setup Gin
 	r := gin.Default()
 	r.GET("/ws", handleWebSocket)
 	routes.SetupRoutes(r, client, &qrCode)

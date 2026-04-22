@@ -3,15 +3,14 @@ package handlers
 import (
 	"context"
 	"fmt"
-		"go.mau.fi/whatsmeow/types"
-"time"
 	"strings"
-
-	"gowa/database"
-	"gowa/utils"
+	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"gowa/database"
+	"gowa/utils"
 )
 
 type MessageHandler struct {
@@ -58,12 +57,10 @@ func (h *MessageHandler) handlePrivateChat(v *events.Message) {
 		return
 	}
 	fmt.Printf("✅ [PRIVATE] %s: %s\n", senderJID, content)
-
 	pushName := h.getPushName(v.Info.Sender)
 	if pushName == "" {
 		pushName = strings.Split(senderJID, "@")[0]
 	}
-
 	h.broadcastMessage(senderJID, chatJID, content, false, v.Info.Timestamp, "PRIVATE", pushName, "")
 }
 
@@ -80,12 +77,10 @@ func (h *MessageHandler) handleGroupChat(v *events.Message) {
 		return
 	}
 	fmt.Printf("✅ [GROUP] %s in %s: %s\n", senderJID, groupJID, content)
-
 	pushName := h.getPushName(v.Info.Sender)
 	if pushName == "" {
 		pushName = strings.Split(senderJID, "@")[0]
 	}
-	// Untuk grup, kita kirim juga sender JID agar client bisa menampilkan nama pengirim
 	h.broadcastMessage(senderJID, groupJID, content, false, v.Info.Timestamp, "GROUP", pushName, senderJID)
 }
 

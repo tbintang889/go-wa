@@ -526,17 +526,14 @@
       }
       function renderMessages(messages, appendToTop = false) {
         const container = document.getElementById("messagesArea");
-        if (container.querySelector(".empty-state")) {
-          container.innerHTML = "";
-        }
+        if (container.querySelector(".empty-state")) container.innerHTML = "";
         const realMessages = messages.filter(
           (msg) => msg.from_jid !== msg.to_jid,
         );
-        if (realMessages.length === 0 && appendToTop === false) {
-          if (currentPage === 1) {
+        if (realMessages.length === 0 && !appendToTop) {
+          if (currentPage === 1)
             container.innerHTML =
               '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
-          }
           return;
         }
         const tempDiv = document.createElement("div");
@@ -546,7 +543,7 @@
             msg.sender_name ||
             msg.push_name ||
             (msg.from_jid ? msg.from_jid.split("@")[0] : "");
-          const messageDiv = createMessageElement(
+          const div = createMessageElement(
             msg.content,
             msg.is_from_me,
             msg.timestamp,
@@ -554,31 +551,25 @@
             senderName,
             isGroup,
           );
-          tempDiv.appendChild(messageDiv);
+          tempDiv.appendChild(div);
         });
         if (appendToTop) {
           const firstChild = container.firstChild;
-          while (tempDiv.firstChild) {
+          while (tempDiv.firstChild)
             container.insertBefore(tempDiv.firstChild, firstChild);
-          }
-          if (container.firstChild) {
+          if (container.firstChild)
             container.scrollTop = container.firstChild.offsetHeight;
-          }
         } else {
           container.innerHTML = "";
-          while (tempDiv.firstChild) {
-            container.appendChild(tempDiv.firstChild);
-          }
+          while (tempDiv.firstChild) container.appendChild(tempDiv.firstChild);
           container.scrollTop = container.scrollHeight;
         }
       }
       function addMessageToBottom(text, isFromMe, senderName, isGroup) {
         const container = document.getElementById("messagesArea");
-        if (container.querySelector(".empty-state")) {
-          container.innerHTML = "";
-        }
+        if (container.querySelector(".empty-state")) container.innerHTML = "";
         if (!text || text.trim() === "") return;
-        const messageDiv = createMessageElement(
+        const div = createMessageElement(
           text,
           isFromMe,
           new Date(),
@@ -586,7 +577,7 @@
           senderName,
           isGroup,
         );
-        container.appendChild(messageDiv);
+        container.appendChild(div);
         container.scrollTop = container.scrollHeight;
       }
       function createMessageElement(
@@ -599,7 +590,6 @@
       ) {
         const messageDiv = document.createElement("div");
         messageDiv.className = `message ${isFromMe ? "sent" : "received"}`;
-
         let timeStr = "Just now";
         if (timestamp) {
           const date = new Date(timestamp);
@@ -608,43 +598,20 @@
             minute: "2-digit",
           });
         }
-
-        let contentHtml = "";
         let headerHtml = "";
-
-        // Untuk pesan grup yang tidak dari saya, tampilkan nama pengirim
         if (isGroup && !isFromMe && senderName) {
           headerHtml = `<div style="font-size: 11px; color: #075e54; margin-bottom: 2px; font-weight: bold;">${escapeHtml(senderName)}</div>`;
         }
-
+        let contentHtml = "";
         if (content && content.includes("📷 Image")) {
           if (mediaPath) {
-            contentHtml = `
-                <div class="message-bubble">
-                    ${headerHtml}
-                    <img src="${mediaPath}" style="max-width: 200px; border-radius: 8px; cursor: pointer;" onclick="window.open(this.src)">
-                    <div class="message-time">${timeStr}</div>
-                </div>
-            `;
+            contentHtml = `<div class="message-bubble">${headerHtml}<img src="${mediaPath}" style="max-width: 200px; border-radius: 8px; cursor: pointer;" onclick="window.open(this.src)"><div class="message-time">${timeStr}</div></div>`;
           } else {
-            contentHtml = `
-                <div class="message-bubble">
-                    ${headerHtml}
-                    ${escapeHtml(content)}
-                    <div class="message-time">${timeStr}</div>
-                </div>
-            `;
+            contentHtml = `<div class="message-bubble">${headerHtml}${escapeHtml(content)}<div class="message-time">${timeStr}</div></div>`;
           }
         } else {
-          contentHtml = `
-            <div class="message-bubble">
-                ${headerHtml}
-                ${escapeHtml(content || "")}
-                <div class="message-time">${timeStr}</div>
-            </div>
-        `;
+          contentHtml = `<div class="message-bubble">${headerHtml}${escapeHtml(content || "")}<div class="message-time">${timeStr}</div></div>`;
         }
-
         messageDiv.innerHTML = contentHtml;
         return messageDiv;
       }
@@ -813,8 +780,42 @@
       async function loadContacts() {
         try {
           const response = await fetch("/api/chats");
-          const data = await response.json();
-          contacts = data;
+          let data = await response.json();
+
+          // Ambil last message untuk setiap kontak via API terpisah (async parallel)
+          const promises = data.map(async (contact) => {
+            try {
+              const msgRes = await fetch(
+                `/api/messages/${encodeURIComponent(contact.jid)}?page=1`,
+              );
+              const msgData = await msgRes.json();
+              const messages = msgData.messages || [];
+              const lastMsg =
+                messages.length > 0 ? messages[messages.length - 1] : null;
+              return {
+                ...contact,
+                last_message: lastMsg ? lastMsg.content : "",
+                last_message_time: lastMsg ? lastMsg.timestamp : null,
+              };
+            } catch (e) {
+              return { ...contact, last_message: "", last_message_time: null };
+            }
+          });
+
+          let contactsWithLastMsg = await Promise.all(promises);
+
+          // Sorting berdasarkan last_message_time (descending)
+          contactsWithLastMsg.sort((a, b) => {
+            const timeA = a.last_message_time
+              ? new Date(a.last_message_time)
+              : 0;
+            const timeB = b.last_message_time
+              ? new Date(b.last_message_time)
+              : 0;
+            return timeB - timeA;
+          });
+
+          contacts = contactsWithLastMsg;
           renderContacts();
         } catch (err) {
           console.error(err);
@@ -822,13 +823,11 @@
             '<div class="loading">Failed to load contacts</div>';
         }
       }
-
       function renderContacts() {
         const container = document.getElementById("contactsList");
         const searchTerm =
           document.getElementById("searchInput")?.value.toLowerCase() || "";
 
-        // Contacts sudah terurut dari backend
         const filtered = contacts.filter(
           (c) =>
             c.name?.toLowerCase().includes(searchTerm) ||
@@ -867,7 +866,6 @@
         const date = new Date(timestamp);
         const now = new Date();
         const diff = now - date;
-
         if (diff < 60 * 1000) return "Now";
         if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}m`;
         if (diff < 24 * 60 * 60 * 1000)
