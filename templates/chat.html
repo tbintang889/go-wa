@@ -434,29 +434,31 @@
         ws.onmessage = function (event) {
           const data = JSON.parse(event.data);
           console.log("WebSocket message:", data);
+
           if (data.type === "new_message") {
             const msg = data.message;
             const isCurrentChat =
-              currentContact &&
-              (msg.from_jid === currentContact.jid ||
-                msg.to_jid === currentContact.jid);
+              currentContact && msg.to_jid === currentContact.jid;
+
             if (isCurrentChat) {
-              const isGroup = msg.chat_type === "GROUP";
-              const senderName =
-                msg.sender_name ||
-                msg.push_name ||
-                (msg.from_jid ? msg.from_jid.split("@")[0] : "");
-              addMessageToBottom(
-                msg.content,
-                msg.is_from_me,
-                senderName,
-                isGroup,
-              );
+              // Untuk grup, pastikan pesan ditampilkan
+              const msgWithSender = {
+                ...msg,
+                sender_name: msg.sender_name || msg.push_name,
+                chat_type: msg.chat_type || "GROUP",
+              };
+              const messageDiv = createMessageElement(msgWithSender);
+              document.getElementById("messagesArea").appendChild(messageDiv);
+              document.getElementById("messagesArea").scrollTop =
+                document.getElementById("messagesArea").scrollHeight;
               totalMessages++;
             } else {
               unreadCount++;
               updateTitleNotification(unreadCount);
-              const senderName = msg.push_name || msg.from_jid.split("@")[0];
+              const senderName =
+                msg.sender_name ||
+                msg.push_name ||
+                extractNumberFromJID(msg.from_jid);
               showDesktopNotification(senderName, msg.content);
               loadContacts();
             }
@@ -527,32 +529,30 @@
       function renderMessages(messages, appendToTop = false) {
         const container = document.getElementById("messagesArea");
         if (container.querySelector(".empty-state")) container.innerHTML = "";
-        const realMessages = messages.filter(
-          (msg) => msg.from_jid !== msg.to_jid,
+
+        // Filter pesan valid
+        const validMessages = messages.filter(
+          (msg) => msg.from_jid !== msg.to_jid && msg.content !== "",
         );
-        if (realMessages.length === 0 && !appendToTop) {
-          if (currentPage === 1)
+
+        if (validMessages.length === 0 && !appendToTop) {
+          if (currentPage === 1) {
             container.innerHTML =
               '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
+          }
           return;
         }
+
         const tempDiv = document.createElement("div");
-        realMessages.forEach((msg) => {
-          const isGroup = msg.chat_type === "GROUP";
-          const senderName =
-            msg.sender_name ||
-            msg.push_name ||
-            (msg.from_jid ? msg.from_jid.split("@")[0] : "");
-          const div = createMessageElement(
-            msg.content,
-            msg.is_from_me,
-            msg.timestamp,
-            msg.media_path,
-            senderName,
-            isGroup,
-          );
-          tempDiv.appendChild(div);
+        validMessages.forEach((msg) => {
+          // Pastikan msg memiliki chat_type
+          if (!msg.chat_type && msg.to_jid && msg.to_jid.includes("@g.us")) {
+            msg.chat_type = "GROUP";
+          }
+          const messageDiv = createMessageElement(msg);
+          tempDiv.appendChild(messageDiv);
         });
+
         if (appendToTop) {
           const firstChild = container.firstChild;
           while (tempDiv.firstChild)
@@ -565,55 +565,113 @@
           container.scrollTop = container.scrollHeight;
         }
       }
-      function addMessageToBottom(text, isFromMe, senderName, isGroup) {
-        const container = document.getElementById("messagesArea");
-        if (container.querySelector(".empty-state")) container.innerHTML = "";
-        if (!text || text.trim() === "") return;
-        const div = createMessageElement(
-          text,
-          isFromMe,
-          new Date(),
-          null,
-          senderName,
-          isGroup,
-        );
-        container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
-      }
-      function createMessageElement(
+
+      // Update addMessageToBottom
+      function addMessageToBottom(
         content,
         isFromMe,
         timestamp,
         mediaPath,
         senderName,
         isGroup,
+        status,
       ) {
+        const container = document.getElementById("messagesArea");
+        if (container.querySelector(".empty-state")) container.innerHTML = "";
+        if (!content || content.trim() === "") return;
+
+        const msg = {
+          content: content,
+          is_from_me: isFromMe,
+          timestamp: timestamp,
+          media_path: mediaPath,
+          chat_type: isGroup ? "GROUP" : "PRIVATE",
+          sender_name: senderName,
+          from_jid: isFromMe ? "me" : senderName,
+          status: status || "sent",
+        };
+
+        const messageDiv = createMessageElement(msg);
+        container.appendChild(messageDiv);
+        container.scrollTop = container.scrollHeight;
+      }
+      function createMessageElement(msg) {
         const messageDiv = document.createElement("div");
+        const isFromMe = msg.is_from_me || false;
         messageDiv.className = `message ${isFromMe ? "sent" : "received"}`;
+
         let timeStr = "Just now";
-        if (timestamp) {
-          const date = new Date(timestamp);
+        if (msg.timestamp) {
+          const date = new Date(msg.timestamp);
           timeStr = date.toLocaleTimeString([], {
             hour: "2-digit",
             minute: "2-digit",
           });
         }
+
         let headerHtml = "";
-        if (isGroup && !isFromMe && senderName) {
-          headerHtml = `<div style="font-size: 11px; color: #075e54; margin-bottom: 2px; font-weight: bold;">${escapeHtml(senderName)}</div>`;
-        }
-        let contentHtml = "";
-        if (content && content.includes("📷 Image")) {
-          if (mediaPath) {
-            contentHtml = `<div class="message-bubble">${headerHtml}<img src="${mediaPath}" style="max-width: 200px; border-radius: 8px; cursor: pointer;" onclick="window.open(this.src)"><div class="message-time">${timeStr}</div></div>`;
-          } else {
-            contentHtml = `<div class="message-bubble">${headerHtml}${escapeHtml(content)}<div class="message-time">${timeStr}</div></div>`;
+
+        // Cek apakah ini pesan grup dan bukan dari saya
+        const isGroup = msg.chat_type === "GROUP";
+
+        if (isGroup && !isFromMe) {
+          // Ambil nama pengirim dari berbagai kemungkinan field
+          let senderDisplay = msg.sender_name || msg.push_name;
+          if (!senderDisplay && msg.from_jid) {
+            // Ekstrak nomor dari JID
+            let jid = msg.from_jid;
+            if (jid.includes("@")) jid = jid.split("@")[0];
+            if (jid.includes(":")) jid = jid.split(":")[0];
+            senderDisplay = jid;
           }
-        } else {
-          contentHtml = `<div class="message-bubble">${headerHtml}${escapeHtml(content || "")}<div class="message-time">${timeStr}</div></div>`;
+          if (senderDisplay && senderDisplay !== "") {
+            headerHtml = `<div style="font-size: 11px; color: #075e54; margin-bottom: 4px; font-weight: 600;">${escapeHtml(senderDisplay)}</div>`;
+          }
         }
+
+        // Status icon
+        let footerHtml = "";
+        if (isFromMe && msg.status) {
+          if (msg.status === "pending") {
+            footerHtml = `<span style="font-size: 10px; color: #999; margin-left: 5px;">⏳</span>`;
+          } else if (msg.status === "sent") {
+            footerHtml = `<span style="font-size: 10px; color: #34b7f1; margin-left: 5px;">✓✓</span>`;
+          } else if (msg.status === "failed") {
+            footerHtml = `<span style="font-size: 10px; color: #dc2626; margin-left: 5px;">⚠️</span>`;
+          }
+        }
+
+        let contentHtml = "";
+        if (msg.content && msg.content.includes("📷 Image") && msg.media_path) {
+          contentHtml = `
+            <div class="message-bubble">
+                ${headerHtml}
+                <img src="${msg.media_path}" style="max-width: 200px; border-radius: 8px; cursor: pointer;" onclick="window.open(this.src)">
+                <div class="message-time">${timeStr} ${footerHtml}</div>
+            </div>
+        `;
+        } else {
+          contentHtml = `
+            <div class="message-bubble">
+                ${headerHtml}
+                ${escapeHtml(msg.content || "")}
+                <div class="message-time">${timeStr} ${footerHtml}</div>
+            </div>
+        `;
+        }
+
         messageDiv.innerHTML = contentHtml;
         return messageDiv;
+      }
+
+      // Helper ekstrak nomor dari JID
+      function extractNumberFromJID(jid) {
+        if (!jid) return "Unknown";
+        let num = jid;
+        if (num.includes("@")) num = num.split("@")[0];
+        if (num.includes(":")) num = num.split(":")[0];
+        if (num === "" || num === jid) return "Unknown";
+        return num;
       }
       function handleScroll() {
         const container = document.getElementById("messagesArea");

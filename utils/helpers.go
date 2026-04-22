@@ -10,23 +10,18 @@ import (
 
 // DetectChatType - deteksi jenis chat dari JID
 func DetectChatType(jid types.JID) string {
-    switch jid.Server {
-    case "s.whatsapp.net":
-        return "PRIVATE"
-    case "lid":
-        return "PRIVATE"
-    case "g.us":
-        return "GROUP"
-    case "broadcast":
-        if jid.User == "status" {
-            return "STATUS"
-        }
-        return "BROADCAST"
-    case "newsletter":
-        return "NEWSLETTER"
-    default:
-        return "UNKNOWN"
-    }
+	switch jid.Server {
+	case "s.whatsapp.net", "lid":
+		return "PRIVATE"
+	case "g.us":
+		return "GROUP"
+	case "broadcast":
+		return "BROADCAST"
+	case "newsletter":
+		return "NEWSLETTER"
+	default:
+		return "UNKNOWN"
+	}
 }
 
 // IsChatable - apakah chat ini bisa dibalas/disimpan? (hanya PRIVATE dan GROUP)
