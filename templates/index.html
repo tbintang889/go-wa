@@ -1,3 +1,4 @@
+<!-- index.html - dengan form kirim pesan yang sudah ada dan diperkuat -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -78,6 +79,23 @@
         }
         h2 { margin-bottom: 15px; color: #333; }
         h3 { margin-bottom: 10px; color: #667eea; }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .send-form {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
@@ -115,6 +133,18 @@
                         <span class="method">POST</span> <span class="path">/api/send-media</span><br>
                         Body: { "to": "628xxxx", "media_type": "image", "file_path": "path.jpg" }
                     </div>
+                </div>
+                <!-- Form Kirim Pesan -->
+                <div class="send-form">
+                    <h3>📨 Kirim Pesan Test</h3>
+                    <div class="form-group">
+                        <input type="text" id="test-number" placeholder="Nomor tujuan (contoh: 628123456789)" value="">
+                    </div>
+                    <div class="form-group">
+                        <textarea id="test-message" rows="3" placeholder="Isi pesan..."></textarea>
+                    </div>
+                    <button onclick="sendTestMessage()">📤 Kirim Pesan</button>
+                    <span id="send-result" style="margin-left: 10px; font-size: 12px;"></span>
                 </div>
                 <div style="margin-top: 15px;">
                     <input type="text" id="test-number" placeholder="628xxxx (nomor tujuan)" style="width: 100%; padding: 8px; margin: 5px 0;">
@@ -198,20 +228,31 @@
         function sendTestMessage() {
             const to = document.getElementById('test-number').value;
             const text = document.getElementById('test-message').value;
+            const resultSpan = document.getElementById('send-result');
             
             if (!to || !text) {
                 alert('Isi nomor dan pesan terlebih dahulu');
                 return;
             }
             
+            resultSpan.innerHTML = '⏳ Mengirim...';
             fetch('/api/send-text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ to, text })
             })
             .then(res => res.json())
-            .then(data => alert(data.status === 'sent' ? '✅ Pesan terkirim!' : '❌ Gagal: ' + JSON.stringify(data)))
-            .catch(err => alert('Error: ' + err));
+            .then(data => {
+                if (data.status === 'sent') {
+                    resultSpan.innerHTML = '✅ Pesan terkirim!';
+                    document.getElementById('test-message').value = '';
+                } else {
+                    resultSpan.innerHTML = '❌ Gagal: ' + JSON.stringify(data);
+                }
+            })
+            .catch(err => {
+                resultSpan.innerHTML = '❌ Error: ' + err.message;
+            });
         }
         
         function fetchContacts() {
@@ -233,7 +274,6 @@
         }
         
         function logout() {
-            // Note: Logout perlu diimplementasikan di backend
             alert('Logout feature - akan disconnect session');
         }
         

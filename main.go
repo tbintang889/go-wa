@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+
 	"os"
 	"os/exec"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -96,7 +98,10 @@ func handleWebSocket(c *gin.Context) {
 					database.UpdateMessageStatus(int(mid), "sent")
 				}
 			}(messageID, jid, to, text)
-		}
+		} else if msg["type"] == "send_media" {
+    // Panggil handler send_media
+    handlers.HandleSendMedia(conn, msg)
+}
 	}
 	wsClientsMu.Lock()
 	delete(wsClients, conn)
@@ -109,6 +114,14 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("Messages database initialized")
+
+	latestVer, err := whatsmeow.GetLatestVersion(ctx, nil)
+	if err == nil && latestVer != nil {
+		store.SetWAVersion(*latestVer)
+		fmt.Printf("Fetched latest WhatsApp Web version: %v\n", *latestVer)
+	} else {
+		fmt.Printf("Could not fetch latest WA version (%v), using default\n", err)
+	}
 
 	dbLogger := waLog.Stdout("Database", "DEBUG", true)
 	dsn := "file:whatsapp.db?_pragma=foreign_keys(1)&_timeout=5000&_busy_timeout=5000"
@@ -124,20 +137,23 @@ func main() {
 
 	messageHandler := handlers.NewMessageHandler(client, broadcastMessage)
 	client.AddEventHandler(func(evt interface{}) {
-	fmt.Printf("🔥 RAW EVENT TYPE: %T\n", evt) // HARUSNYA muncul *events.Message
-	
-	switch v := evt.(type) {
-	case *events.Message:
-		fmt.Printf("🔥 MESSAGE FROM: %s\n", v.Info.Sender)
-		messageHandler.HandleIncomingMessage(v)
-	case *events.HistorySync:
-		fmt.Printf("History sync ignored: %d conversations\n", len(v.Data.GetConversations()))
-	case *events.PushName:
-		fmt.Printf("PushName update: %s -> %s\n", v.JID, v.NewPushName)
-	default:
-		fmt.Printf("Unhandled event: %T\n", evt)
-	}
-})
+		fmt.Printf("🔥 RAW EVENT TYPE: %T\n", evt) // HARUSNYA muncul *events.Message
+
+		switch v := evt.(type) {
+		case *events.Message:
+			fmt.Printf("🔥 MESSAGE FROM: %s\n", v.Info.Sender)
+			messageHandler.HandleIncomingMessage(v)
+		case *events.HistorySync:
+			go messageHandler.HandleHistorySync(v)
+		case *events.PushName:
+			fmt.Printf("PushName update: %s -> %s\n", v.JID, v.NewPushName)
+		case *events.LoggedOut:
+			fmt.Printf("⚠️ Session logged out by WhatsApp (reason: %v). Clearing session...\n", v.Reason)
+			_ = deviceStore.Delete(ctx)
+		default:
+			fmt.Printf("Unhandled event: %T\n", evt)
+		}
+	})
 
 	qrChan, _ := client.GetQRChannel(ctx)
 	go func() {
@@ -160,9 +176,27 @@ func main() {
 	if err := client.Connect(); err != nil {
 		panic(err)
 	}
+	// Matikan log Gin
+	gin.SetMode(gin.ReleaseMode)
 
-	r := gin.Default()
-	r.GET("/ws", handleWebSocket)
+	// r := gin.Default()
+	  r := gin.New()
+    
+    // Tambahkan recovery (tanpa logger)
+    r.Use(gin.Recovery())
+    
+    // Optional: Tambahkan custom logger hanya untuk error
+    r.Use(func(c *gin.Context) {
+        c.Next()
+        // Hanya log error (status >= 400)
+        if c.Writer.Status() >= 400 {
+            fmt.Printf("[ERROR] %s %s -> %d\n", c.Request.Method, c.Request.URL.Path, c.Writer.Status())
+        }
+    })
+	// Set WhatsApp client untuk WebSocket handler
+	handlers.SetWhatsAppClient(client)
+	// r.GET("/ws", handleWebSocket)
+	r.GET("/ws", handlers.HandleWebSocket)
 	routes.SetupRoutes(r, client, &qrCode)
 	r.LoadHTMLGlob("templates/*")
 

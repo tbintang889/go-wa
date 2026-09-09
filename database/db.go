@@ -67,17 +67,15 @@ func InitDB(dbPath string) error {
         println("✅ Added media_path column")
     }
     
-    // Cek dan tambahkan kolom status jika belum ada
-    var hasStatus int
-    DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'status'").Scan(&hasStatus)
-    if hasStatus == 0 {
-        _, err = DB.Exec("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'pending'")
-        if err != nil {
-            return err
-        }
-        println("✅ Added status column")
-    }
-    
+    // Bersihkan entri pesan status, broadcast, dan newsletter (saluran) yang tersimpan sebelumnya
+    _, _ = DB.Exec(`
+        DELETE FROM messages WHERE 
+        from_jid LIKE '%@broadcast' OR to_jid LIKE '%@broadcast' OR 
+        from_jid LIKE '%@newsletter' OR to_jid LIKE '%@newsletter' OR 
+        from_jid LIKE 'status@%' OR to_jid LIKE 'status@%' OR
+        from_jid LIKE '%@call' OR to_jid LIKE '%@call';
+    `)
+
     return nil
 }
 
@@ -97,8 +95,16 @@ type Message struct {
 // SaveMessage - untuk pesan teks biasa
 func SaveMessage(fromJID, toJID, content string, isFromMe bool) error {
     query := `INSERT INTO messages (from_jid, to_jid, content, is_from_me, status, timestamp) 
-              VALUES (?, ?, ?, ?, 'pending', ?)`
+              VALUES (?, ?, ?, ?, 'sent', ?)`
     _, err := DB.Exec(query, fromJID, toJID, content, isFromMe, time.Now())
+    return err
+}
+
+// SaveMessageWithTimestamp - untuk simpan riwayat pesan dengan timestamp tertentu
+func SaveMessageWithTimestamp(fromJID, toJID, content string, isFromMe bool, ts time.Time) error {
+    query := `INSERT INTO messages (from_jid, to_jid, content, is_from_me, status, timestamp) 
+              VALUES (?, ?, ?, ?, 'sent', ?)`
+    _, err := DB.Exec(query, fromJID, toJID, content, isFromMe, ts)
     return err
 }
 
@@ -172,8 +178,19 @@ func GetMessagesByJID(jid string, limit int) ([]Message, error) {
 }
 
 func GetAllChats() ([]string, error) {
-	query := `SELECT DISTINCT from_jid FROM messages 
-              UNION SELECT DISTINCT to_jid FROM messages`
+	query := `SELECT DISTINCT jid FROM (
+		SELECT from_jid AS jid FROM messages 
+		WHERE from_jid != '' AND from_jid != 'me' 
+		  AND from_jid NOT LIKE '%@broadcast' 
+		  AND from_jid NOT LIKE '%@newsletter' 
+		  AND from_jid NOT LIKE 'status@%'
+		UNION 
+		SELECT to_jid AS jid FROM messages 
+		WHERE to_jid != '' AND to_jid != 'me' 
+		  AND to_jid NOT LIKE '%@broadcast' 
+		  AND to_jid NOT LIKE '%@newsletter' 
+		  AND to_jid NOT LIKE 'status@%'
+	)`
 	rows, err := DB.Query(query)
 	if err != nil {
 		return nil, err

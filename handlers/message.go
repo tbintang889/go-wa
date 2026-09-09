@@ -28,17 +28,23 @@ func NewMessageHandler(client *whatsmeow.Client, broadcastFunc func(interface{})
 
 // HandleIncomingMessage - fungsi utama untuk menangani pesan masuk
 func (h *MessageHandler) HandleIncomingMessage(v *events.Message) {
-	// Log semua pesan masuk untuk debug
-	fmt.Printf("📨 [DEBUG] Message received. IsFromMe: %v, Sender: %s, Chat: %s\n",
-		v.Info.IsFromMe, v.Info.Sender, v.Info.Chat)
+	// Filter out WA Status, Broadcast list, and Newsletter (Saluran)
+	if v.Info.Chat.User == "status" || v.Info.Chat.Server == "broadcast" || v.Info.Chat.Server == "newsletter" || v.Info.Sender.Server == "newsletter" || v.Info.Sender.User == "status" {
+		return
+	}
 
 	// Deteksi jenis chat
 	chatType := utils.DetectChatType(v.Info.Chat)
-	fmt.Printf("📨 [DEBUG] ChatType: %s\n", chatType)
+	if !utils.IsChatable(chatType) {
+		return
+	}
+
+	// Log pesan masuk untuk debug
+	fmt.Printf("📨 [DEBUG] Message received. IsFromMe: %v, Sender: %s, Chat: %s (Type: %s)\n",
+		v.Info.IsFromMe, v.Info.Sender, v.Info.Chat, chatType)
 
 	// Ekstrak konten
 	content := utils.ExtractMessageContent(v.Message)
-	fmt.Printf("📨 [DEBUG] Content: '%s'\n", content)
 
 	// Proses berdasarkan jenis chat
 	switch chatType {
@@ -46,8 +52,6 @@ func (h *MessageHandler) HandleIncomingMessage(v *events.Message) {
 		h.handlePrivateChat(v, content)
 	case "GROUP":
 		h.handleGroupChat(v, content)
-	default:
-		fmt.Printf("⏭️ Skipping unknown chat type: %s\n", chatType)
 	}
 }
 
@@ -328,4 +332,67 @@ func extractNumberFromJID(jid string) string {
 		jid = jid[:idx]
 	}
 	return jid
+}
+
+// HandleHistorySync - menangani sync riwayat pesan & kontak dari WhatsApp
+func (h *MessageHandler) HandleHistorySync(v *events.HistorySync) {
+	if v == nil || v.Data == nil {
+		return
+	}
+
+	conversations := v.Data.GetConversations()
+	fmt.Printf("🔄 [HISTORY] Syncing %d conversations from WhatsApp...\n", len(conversations))
+
+	botJID := ""
+	if h.Client != nil && h.Client.Store != nil && h.Client.Store.ID != nil {
+		botJID = h.Client.Store.ID.String()
+	}
+
+	savedCount := 0
+	for _, conv := range conversations {
+		chatJIDStr := conv.GetID()
+
+		if chatJIDStr == "" || !utils.IsValidChatJID(chatJIDStr) {
+			continue
+		}
+
+		for _, syncMsg := range conv.GetMessages() {
+			msg := syncMsg.GetMessage()
+			if msg == nil {
+				continue
+			}
+
+			key := msg.GetKey()
+			if key == nil {
+				continue
+			}
+
+			isFromMe := key.GetFromMe()
+			senderJID := chatJIDStr
+			if isFromMe {
+				senderJID = botJID
+			} else if key.GetParticipant() != "" {
+				senderJID = key.GetParticipant()
+			}
+
+			content := utils.ExtractMessageContent(msg.GetMessage())
+			if content == "" {
+				continue
+			}
+
+			ts := time.Unix(int64(msg.GetMessageTimestamp()), 0)
+			if ts.IsZero() || ts.Unix() <= 0 {
+				ts = time.Now()
+			}
+
+			if err := database.SaveMessageWithTimestamp(senderJID, chatJIDStr, content, isFromMe, ts); err == nil {
+				savedCount++
+			}
+		}
+	}
+
+	fmt.Printf("✅ [HISTORY] Successfully synced %d historical messages into database!\n", savedCount)
+	if h.BroadcastFunc != nil {
+		h.BroadcastFunc(map[string]interface{}{"type": "history_sync_complete"})
+	}
 }

@@ -10,13 +10,14 @@ import (
 
 // DetectChatType - deteksi jenis chat dari JID
 func DetectChatType(jid types.JID) string {
+	if jid.User == "status" || jid.Server == "broadcast" {
+		return "BROADCAST"
+	}
 	switch jid.Server {
-	case "s.whatsapp.net", "lid":
+	case "s.whatsapp.net", "lid", "c.us":
 		return "PRIVATE"
 	case "g.us":
 		return "GROUP"
-	case "broadcast":
-		return "BROADCAST"
 	case "newsletter":
 		return "NEWSLETTER"
 	default:
@@ -24,9 +25,23 @@ func DetectChatType(jid types.JID) string {
 	}
 }
 
+// IsValidChatJID - apakah JID ini merupakan chat pribadi atau grup yang valid?
+func IsValidChatJID(jidStr string) bool {
+	if jidStr == "" || jidStr == "me" || strings.HasPrefix(jidStr, "status@") {
+		return false
+	}
+	if strings.HasSuffix(jidStr, "@broadcast") || strings.HasSuffix(jidStr, "@newsletter") || strings.HasSuffix(jidStr, "@call") {
+		return false
+	}
+	return strings.HasSuffix(jidStr, "@s.whatsapp.net") ||
+		strings.HasSuffix(jidStr, "@g.us") ||
+		strings.HasSuffix(jidStr, "@lid") ||
+		strings.HasSuffix(jidStr, "@c.us")
+}
+
 // IsChatable - apakah chat ini bisa dibalas/disimpan? (hanya PRIVATE dan GROUP)
 func IsChatable(chatType string) bool {
-    return chatType == "PRIVATE" || chatType == "GROUP"
+	return chatType == "PRIVATE" || chatType == "GROUP"
 }
 
 // ExtractMessageContent - ekstrak konten pesan
@@ -88,23 +103,30 @@ func ExtractMessageContent(msg *waProto.Message) string {
 
 // NormalizeJID - normalisasi format JID ke format terbaru
 func NormalizeJID(jid string) string {
-    // Ubah @c.us menjadi @s.whatsapp.net
-    if strings.HasSuffix(jid, "@c.us") {
-        return strings.TrimSuffix(jid, "@c.us") + "@s.whatsapp.net"
+    // 🔥 PRIORITAS: Ubah @lid → @s.whatsapp.net
+    if strings.HasSuffix(jid, "@lid") {
+        jid = strings.TrimSuffix(jid, "@lid") + "@s.whatsapp.net"
+        return jid
     }
     
-    // Ubah @lid menjadi @s.whatsapp.net (opsional, hati-hati)
-    // if strings.HasSuffix(jid, "@lid") {
-    //     return strings.TrimSuffix(jid, "@lid") + "@s.whatsapp.net"
-    // }
-    
-    // Hapus bagian :64 atau :0 dari JID
-    if strings.Contains(jid, ":") {
-        parts := strings.Split(jid, ":")
-        if strings.Contains(parts[0], "@") {
-            return parts[0]
+    // Hapus :64 atau :0
+    if idx := strings.Index(jid, ":"); idx != -1 {
+        jid = jid[:idx]
+        if !strings.Contains(jid, "@") {
+            jid = jid + "@s.whatsapp.net"
         }
-        return parts[0] + "@s.whatsapp.net"
+        return jid
+    }
+    
+    // Ubah @c.us
+    if strings.HasSuffix(jid, "@c.us") {
+        jid = strings.TrimSuffix(jid, "@c.us") + "@s.whatsapp.net"
+        return jid
+    }
+    
+    // Jika tidak ada @, tambahkan @s.whatsapp.net
+    if !strings.Contains(jid, "@") {
+        jid = jid + "@s.whatsapp.net"
     }
     
     return jid

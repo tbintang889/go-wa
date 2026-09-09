@@ -43,13 +43,21 @@ func GetStatusFullHandler(client *whatsmeow.Client, qrCode *string) gin.HandlerF
 }
 func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Query super simple: ambil semua JID unik
+		// Query JID unik, kecualikan status, broadcast, dan saluran/newsletter
 		rows, err := database.DB.Query(`
-			SELECT DISTINCT from_jid FROM messages 
-			WHERE from_jid != '' AND from_jid != 'me' AND from_jid != to_jid
-			UNION
-			SELECT DISTINCT to_jid FROM messages 
-			WHERE to_jid != '' AND to_jid != 'me' AND from_jid != to_jid
+			SELECT DISTINCT jid FROM (
+				SELECT from_jid AS jid FROM messages 
+				WHERE from_jid != '' AND from_jid != 'me' AND from_jid != to_jid
+				  AND from_jid NOT LIKE '%@broadcast' 
+				  AND from_jid NOT LIKE '%@newsletter' 
+				  AND from_jid NOT LIKE 'status@%'
+				UNION
+				SELECT to_jid AS jid FROM messages 
+				WHERE to_jid != '' AND to_jid != 'me' AND from_jid != to_jid
+				  AND to_jid NOT LIKE '%@broadcast' 
+				  AND to_jid NOT LIKE '%@newsletter' 
+				  AND to_jid NOT LIKE 'status@%'
+			)
 		`)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -61,10 +69,10 @@ func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 		for rows.Next() {
 			var jidStr string
 			rows.Scan(&jidStr)
-			if jidStr == "" || jidStr == "me" {
+			if !utils.IsValidChatJID(jidStr) {
 				continue
 			}
-			
+
 			// Bersihkan JID untuk display
 			displayName := jidStr
 			if strings.Contains(jidStr, ":") {
@@ -73,8 +81,8 @@ func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 			if strings.Contains(displayName, "@") {
 				displayName = strings.Split(displayName, "@")[0]
 			}
-			
-			// Push name (optional, tidak ambil last message biar cepat)
+
+			// Push name
 			jid, err := types.ParseJID(jidStr)
 			if err == nil {
 				contact, err := client.Store.Contacts.GetContact(context.Background(), jid)
@@ -82,14 +90,14 @@ func GetChatsHandler(client *whatsmeow.Client) gin.HandlerFunc {
 					displayName = contact.PushName
 				}
 			}
-			
+
 			chatList = append(chatList, gin.H{
 				"jid":    jidStr,
 				"name":   displayName,
 				"number": jidStr,
 			})
 		}
-		
+
 		c.JSON(200, chatList)
 	}
 }

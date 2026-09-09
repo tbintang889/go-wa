@@ -70,17 +70,7 @@ func SendText(client *whatsmeow.Client) gin.HandlerFunc {
     }
 }
 
-func SendMedia(client *whatsmeow.Client) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        c.JSON(http.StatusNotImplemented, gin.H{"error": "Send media not implemented yet"})
-    }
-}
 
-func GetDeliveryStatus(client *whatsmeow.Client) gin.HandlerFunc {
-    return func(c *gin.Context) {
-        c.JSON(http.StatusNotImplemented, gin.H{"error": "Delivery status not implemented yet"})
-    }
-}
 
 func IncomingWebhook(c *gin.Context) {
     var msg struct {

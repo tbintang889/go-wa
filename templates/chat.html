@@ -1,3 +1,4 @@
+<!-- chat.html - diperbaiki -->
 <!doctype html>
 <html lang="en">
   <head>
@@ -328,6 +329,18 @@
         color: #999;
         margin-left: 8px;
       }
+      .attach-btn {
+        background: none !important;
+        border: none !important;
+        font-size: 22px;
+        cursor: pointer;
+        padding: 8px !important;
+        color: #666;
+      }
+
+      .attach-btn:hover {
+        color: #075e54;
+      }
     </style>
   </head>
   <body>
@@ -392,6 +405,18 @@
         </div>
         <div class="input-area" id="inputArea" style="display: none">
           <button class="emoji-btn" onclick="showEmojiPicker()">😊</button>
+          <button
+            class="attach-btn"
+            onclick="showFilePicker()"
+            style="
+              background: none;
+              border: none;
+              font-size: 24px;
+              cursor: pointer;
+            "
+          >
+            📎
+          </button>
           <input
             type="text"
             id="messageInput"
@@ -400,6 +425,14 @@
           />
           <button onclick="sendMessage()">Send</button>
         </div>
+
+        <!-- Hidden file input -->
+        <input
+          type="file"
+          id="fileInput"
+          style="display: none"
+          accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.*,video/*,audio/*"
+        />
       </div>
     </div>
 
@@ -410,308 +443,34 @@
       let isLoading = false;
       let hasMore = true;
       let totalMessages = 0;
-      /* 
-      let notificationSound = new Audio(
-        "https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3",
-      ); */
       let unreadCount = 0;
       let originalTitle = document.title;
-
       let ws;
-      // Tambahkan fungsi normalisasi JID
+
+      // Helper functions
       function normalizeJID(jid) {
-        // Hapus bagian :64 atau :0 dari JID
         if (jid.includes(":")) {
           const parts = jid.split(":");
           return parts[0] + "@s.whatsapp.net";
         }
         return jid;
       }
-      function connectWebSocket() {
-        ws = new WebSocket("ws://localhost:8084/ws");
 
-        ws.onopen = function () {
-          console.log("WebSocket connected");
-          // HAPUS ws.send dari sini! Jangan kirim pesan saat koneksi terbuka
-        };
-
-        ws.onmessage = function (event) {
-          const data = JSON.parse(event.data);
-          console.log("WebSocket message:", data);
-
-          if (data.type === "new_message") {
-            const msg = data.message;
-            const isCurrentChat =
-              currentContact && msg.to_jid === currentContact.jid;
-
-            if (isCurrentChat) {
-              // Untuk grup, pastikan pesan ditampilkan
-              const msgWithSender = {
-                ...msg,
-                sender_name: msg.sender_name || msg.push_name,
-                chat_type: msg.chat_type || "GROUP",
-              };
-              const messageDiv = createMessageElement(msgWithSender);
-              document.getElementById("messagesArea").appendChild(messageDiv);
-              document.getElementById("messagesArea").scrollTop =
-                document.getElementById("messagesArea").scrollHeight;
-              totalMessages++;
-            } else {
-              unreadCount++;
-              updateTitleNotification(unreadCount);
-              const senderName =
-                msg.sender_name ||
-                msg.push_name ||
-                extractNumberFromJID(msg.from_jid);
-              showDesktopNotification(senderName, msg.content);
-              loadContacts();
-            }
-          }
-        };
-        // Fungsi untuk update status pesan
-        function updateMessageStatus(messageId, status, errorMsg) {
-          // Cari pesan dengan ID tersebut dan update icon status
-          const messages = document.querySelectorAll(".message");
-          // Note: perlu cara yang lebih baik untuk track message by ID
-          console.log(`Message ${messageId} status: ${status}`, errorMsg || "");
-        }
-
-        ws.onerror = function (error) {
-          console.error("WebSocket error:", error);
-        };
-
-        ws.onclose = function () {
-          console.log("WebSocket disconnected, reconnecting...");
-          setTimeout(connectWebSocket, 3000);
-        };
-      }
-      // Update loadMessages - gunakan normalizedJid untuk query
-      // Load messages dengan pagination
-      async function loadMessages(reset = true) {
-        if (!currentContact) return;
-
-        if (reset) {
-          currentPage = 1;
-          hasMore = true;
-          document.getElementById("messagesArea").innerHTML = "";
-          scrollPosition = 0;
-        }
-
-        if (isLoading || !hasMore) return;
-
-        isLoading = true;
-        showLoadingIndicator();
-
-        try {
-          const queryJid = currentContact.normalizedJid || currentContact.jid;
-          const response = await fetch(
-            `/api/messages/${encodeURIComponent(queryJid)}?page=${currentPage}`,
-          );
-          const data = await response.json();
-
-          totalMessages = data.total || 0;
-          hasMore = data.has_more || false;
-          const messages = data.messages || [];
-
-          if (messages.length > 0) {
-            if (reset) {
-              // First load: replace all
-              renderMessages(messages, false);
-              // Scroll ke bawah
-              const container = document.getElementById("messagesArea");
-              container.scrollTop = container.scrollHeight;
-            } else {
-              // Load older: tambahkan di atas
-              const oldScrollHeight =
-                document.getElementById("messagesArea").scrollHeight;
-              renderMessages(messages, true);
-              // Maintain scroll position
-              const newScrollHeight =
-                document.getElementById("messagesArea").scrollHeight;
-              document.getElementById("messagesArea").scrollTop =
-                newScrollHeight - oldScrollHeight + 50;
-            }
-          } else if (currentPage === 1 && messages.length === 0) {
-            document.getElementById("messagesArea").innerHTML =
-              '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
-          }
-        } catch (err) {
-          console.error("Error loading messages:", err);
-          if (currentPage === 1) {
-            document.getElementById("messagesArea").innerHTML =
-              '<div class="empty-state"><p>Error loading messages</p></div>';
-          }
-        } finally {
-          isLoading = false;
-          removeLoadingIndicator();
-        }
+      function escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
       }
 
-      // Render messages
-      function renderMessages(messages, appendToTop = false) {
-        const container = document.getElementById("messagesArea");
-
-        // Filter pesan valid
-        const validMessages = messages.filter(
-          (msg) => msg.from_jid !== msg.to_jid && msg.content !== "",
-        );
-
-        if (validMessages.length === 0 && !appendToTop) {
-          if (currentPage === 1) {
-            container.innerHTML =
-              '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
-          }
-          return;
-        }
-
-        const tempDiv = document.createElement("div");
-        validMessages.forEach((msg) => {
-          if (!msg.chat_type && msg.to_jid && msg.to_jid.includes("@g.us")) {
-            msg.chat_type = "GROUP";
-          }
-          const messageDiv = createMessageElement(msg);
-          tempDiv.appendChild(messageDiv);
-        });
-
-        if (appendToTop) {
-          // Tambahkan di ATAS (untuk older messages)
-          const firstChild = container.firstChild;
-          while (tempDiv.firstChild) {
-            container.insertBefore(tempDiv.firstChild, firstChild);
-          }
-        } else {
-          // Replace semua pesan (first load)
-          container.innerHTML = "";
-          while (tempDiv.firstChild) {
-            container.appendChild(tempDiv.firstChild);
-          }
-        }
+      function getInitials(name) {
+        if (!name) return "?";
+        if (name.includes("@")) name = name.split("@")[0];
+        if (/^\d+$/.test(name)) return name.slice(-2);
+        const words = name.split(" ");
+        if (words.length === 1) return name.charAt(0).toUpperCase();
+        return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
       }
 
-      // Update addMessageToBottom
-      function addMessageToBottom(
-        content,
-        isFromMe,
-        timestamp,
-        mediaPath,
-        senderName,
-        isGroup,
-        status,
-      ) {
-        const container = document.getElementById("messagesArea");
-        if (container.querySelector(".empty-state")) container.innerHTML = "";
-        if (!content || content.trim() === "") return;
-
-        const msg = {
-          content: content,
-          is_from_me: isFromMe,
-          timestamp: timestamp,
-          media_path: mediaPath,
-          chat_type: isGroup ? "GROUP" : "PRIVATE",
-          sender_name: senderName,
-          from_jid: isFromMe ? "me" : senderName,
-          status: status || "sent",
-        };
-
-        const messageDiv = createMessageElement(msg);
-        container.appendChild(messageDiv);
-        container.scrollTop = container.scrollHeight;
-      }
-      function createMessageElement(msg) {
-        const messageDiv = document.createElement("div");
-        const isFromMe = msg.is_from_me || false;
-        messageDiv.className = `message ${isFromMe ? "sent" : "received"}`;
-
-        let timeStr = "Just now";
-        if (msg.timestamp) {
-          const date = new Date(msg.timestamp);
-          timeStr = date.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        }
-
-        let headerHtml = "";
-        const isGroup = msg.chat_type === "GROUP";
-        if (isGroup && !isFromMe) {
-          let senderDisplay = msg.sender_name || msg.push_name;
-          if (!senderDisplay && msg.from_jid) {
-            senderDisplay = extractNumber(msg.from_jid);
-          }
-          if (senderDisplay && senderDisplay !== "") {
-            headerHtml = `<div style="font-size: 11px; color: #075e54; margin-bottom: 4px; font-weight: 600;">${escapeHtml(senderDisplay)}</div>`;
-          }
-        }
-
-        let contentHtml = "";
-        const mediaPath = msg.media_path;
-        const mediaType = msg.media_type;
-        const messageId = msg.id; // ← Ambil ID pesan
-
-        // Image preview - gunakan /api/media/:id
-        if (
-          (mediaType === "image" ||
-            (msg.content && msg.content.includes("📷 Image"))) &&
-          messageId
-        ) {
-          contentHtml = `
-            <div class="message-bubble" style="padding: 4px;">
-                ${headerHtml}
-                <img src="/api/media/${messageId}" 
-                     style="max-width: 250px; max-height: 250px; border-radius: 8px; cursor: pointer;" 
-                     onclick="window.open('/api/media/${messageId}')"
-                     onerror="this.onerror=null; this.style.display='none'; this.nextSibling.style.display='block'">
-                <div style="display: none;">Failed to load image</div>
-                <div class="message-time">${timeStr}</div>
-            </div>
-        `;
-        }
-        // Document/File
-        else if (
-          (mediaType === "document" ||
-            mediaType === "video" ||
-            mediaType === "audio") &&
-          messageId
-        ) {
-          let fileIcon = "📄";
-          if (mediaType === "video") fileIcon = "🎬";
-          if (mediaType === "audio") fileIcon = "🎵";
-
-          let fileName = "file";
-          if (msg.content) {
-            // Ekstrak nama file dari content
-            const parts = msg.content.split(": ");
-            if (parts.length > 1) fileName = parts[1];
-          }
-
-          contentHtml = `
-            <div class="message-bubble">
-                ${headerHtml}
-                <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;" onclick="window.open('/api/media/${messageId}')">
-                    <span style="font-size: 28px;">${fileIcon}</span>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 500;">${escapeHtml(fileName)}</div>
-                        <div style="font-size: 10px; color: #666;">Click to download</div>
-                    </div>
-                </div>
-                <div class="message-time">${timeStr}</div>
-            </div>
-        `;
-        }
-        // Text message
-        else {
-          contentHtml = `
-            <div class="message-bubble">
-                ${headerHtml}
-                ${escapeHtml(msg.content || "")}
-                <div class="message-time">${timeStr}</div>
-            </div>
-        `;
-        }
-
-        messageDiv.innerHTML = contentHtml;
-        return messageDiv;
-      }
       function extractNumber(jid) {
         if (!jid) return "Unknown";
         let num = jid;
@@ -719,18 +478,155 @@
         if (num.includes(":")) num = num.split(":")[0];
         return num || "Unknown";
       }
-      // Load older messages saat scroll ke atas
-      function handleScroll() {
-        const container = document.getElementById("messagesArea");
-        if (!container || isLoading || !hasMore) return;
 
-        // Jika scroll ke atas (top threshold 100px)
-        if (container.scrollTop <= 100) {
-          currentPage++;
-          loadMessages(false); // false = append to top
+      function formatMessageTime(timestamp) {
+        if (!timestamp) return "";
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        if (diff < 60 * 1000) return "Now";
+        if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}m`;
+        if (diff < 24 * 60 * 60 * 1000)
+          return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        return date.toLocaleDateString([], { day: "numeric", month: "short" });
+      }
+
+      // Notification functions
+      function updateTitleNotification(count) {
+        if (count > 0) document.title = `(${count}) ${originalTitle}`;
+        else document.title = originalTitle;
+      }
+
+      function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission === "default") {
+          Notification.requestPermission();
         }
       }
-      // Show loading indicator di atas
+
+      function showDesktopNotification(sender, message, isGroup = false) {
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
+        const options = {
+          body: message,
+          icon: "https://web.whatsapp.com/favicon.ico",
+          tag: sender,
+          requireInteraction: false,
+          silent: false,
+        };
+        const title = isGroup ? `📢 ${sender}` : `💬 ${sender}`;
+        const notification = new Notification(title, options);
+        notification.onclick = () => { window.focus(); notification.close(); };
+        setTimeout(() => notification.close(), 5000);
+      }
+
+      window.enableNotifications = function() {
+        if ("Notification" in window) {
+          Notification.requestPermission().then(perm => {
+            if (perm === "granted") alert("Notifikasi diaktifkan!");
+          });
+        } else {
+          alert("Browser tidak support notifikasi");
+        }
+      };
+
+      // Create message element
+      function createMessageElement(msg) {
+        const messageDiv = document.createElement("div");
+        const isFromMe = msg.is_from_me || false;
+        messageDiv.className = `message ${isFromMe ? "sent" : "received"}`;
+        if (msg.id) messageDiv.setAttribute("data-id", msg.id);
+
+        let timeStr = "Just now";
+        if (msg.timestamp) {
+          const date = new Date(msg.timestamp);
+          timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }
+
+        let headerHtml = "";
+        const isGroup = msg.chat_type === "GROUP";
+        if (isGroup && !isFromMe) {
+          let senderDisplay = msg.sender_name || msg.push_name;
+          if (!senderDisplay && msg.from_jid) senderDisplay = extractNumber(msg.from_jid);
+          if (senderDisplay && senderDisplay !== "") {
+            headerHtml = `<div style="font-size: 11px; color: #075e54; margin-bottom: 4px; font-weight: 600;">${escapeHtml(senderDisplay)}</div>`;
+          }
+        }
+
+        let statusIcon = "";
+        if (isFromMe && msg.status) {
+          if (msg.status === "pending") statusIcon = " ⏳";
+          else if (msg.status === "sent") statusIcon = " ✓✓";
+          else if (msg.status === "failed") statusIcon = " ⚠️";
+        }
+
+        let contentHtml = "";
+        const mediaPath = msg.media_path;
+        const mediaType = msg.media_type;
+        const messageId = msg.id;
+
+        if ((mediaPath || mediaType === "image" || (msg.content && msg.content.includes("📷 Image"))) && messageId) {
+          contentHtml = `
+            <div class="message-bubble" style="padding: 4px;">
+                ${headerHtml}
+                <img src="/api/media/${messageId}" 
+                     style="max-width: 250px; max-height: 250px; border-radius: 8px; cursor: pointer;" 
+                     onclick="window.open('/api/media/${messageId}')"
+                     onerror="this.onerror=null; this.style.display='none'">
+                <div class="message-time">${timeStr}${statusIcon}</div>
+            </div>
+          `;
+        } else if ((mediaType === "document" || (msg.content && msg.content.includes("📄"))) && messageId) {
+          let fileName = "file";
+          if (msg.content) {
+            const parts = msg.content.split(": ");
+            if (parts.length > 1) fileName = parts[1];
+          }
+          contentHtml = `
+            <div class="message-bubble">
+                ${headerHtml}
+                <div style="display: flex; align-items: center; gap: 8px; cursor: pointer;" onclick="window.open('/api/media/${messageId}')">
+                    <span style="font-size: 28px;">📄</span>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500;">${escapeHtml(fileName)}</div>
+                        <div style="font-size: 10px; color: #666;">Click to download</div>
+                    </div>
+                </div>
+                <div class="message-time">${timeStr}${statusIcon}</div>
+            </div>
+          `;
+        } else {
+          contentHtml = `
+            <div class="message-bubble">
+                ${headerHtml}
+                ${escapeHtml(msg.content || "")}
+                <div class="message-time">${timeStr}${statusIcon}</div>
+            </div>
+          `;
+        }
+        messageDiv.innerHTML = contentHtml;
+        return messageDiv;
+      }
+
+      // Add message to bottom (simplified)
+      function addMessageToBottom(content, isFromMe, timestamp, mediaPath, senderName, isGroup, status) {
+        const container = document.getElementById("messagesArea");
+        if (container.querySelector(".empty-state")) container.innerHTML = "";
+        if (!content || content.trim() === "") return;
+        const msg = {
+          content: content,
+          is_from_me: isFromMe,
+          timestamp: timestamp || new Date(),
+          media_path: mediaPath,
+          chat_type: isGroup ? "GROUP" : "PRIVATE",
+          sender_name: senderName,
+          from_jid: isFromMe ? "me" : (senderName || "Unknown"),
+          status: status || "sent",
+        };
+        const messageDiv = createMessageElement(msg);
+        container.appendChild(messageDiv);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      // Loading indicators
       function showLoadingIndicator() {
         const container = document.getElementById("messagesArea");
         let loader = document.getElementById("scrollLoader");
@@ -742,103 +638,129 @@
           container.insertBefore(loader, container.firstChild);
         }
       }
-
       function removeLoadingIndicator() {
         const loader = document.getElementById("scrollLoader");
         if (loader) loader.remove();
       }
+      function showLoadingMessage(text) {
+        const container = document.getElementById("messagesArea");
+        const id = "loading_" + Date.now();
+        const loadingDiv = document.createElement("div");
+        loadingDiv.id = id;
+        loadingDiv.className = "message sent";
+        loadingDiv.innerHTML = `<div class="message-bubble" style="background: #dcf8c5;"><span>⏳ ${text}</span><div class="message-time">Just now</div></div>`;
+        container.appendChild(loadingDiv);
+        container.scrollTop = container.scrollHeight;
+        return id;
+      }
+      function removeLoadingMessage(id) {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      }
 
-      // Update selectContact - simpan kedua format JID
+      // Render messages
+      function renderMessages(messages, appendToTop = false) {
+        const container = document.getElementById("messagesArea");
+        const validMessages = messages.filter(msg => msg.from_jid !== msg.to_jid && msg.content !== "");
+        if (validMessages.length === 0 && !appendToTop) {
+          if (currentPage === 1) container.innerHTML = '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
+          return;
+        }
+        const tempDiv = document.createElement("div");
+        validMessages.forEach(msg => {
+          if (!msg.chat_type && msg.to_jid && msg.to_jid.includes("@g.us")) msg.chat_type = "GROUP";
+          const messageDiv = createMessageElement(msg);
+          tempDiv.appendChild(messageDiv);
+        });
+        if (appendToTop) {
+          const firstChild = container.firstChild;
+          while (tempDiv.firstChild) container.insertBefore(tempDiv.firstChild, firstChild);
+        } else {
+          container.innerHTML = "";
+          while (tempDiv.firstChild) container.appendChild(tempDiv.firstChild);
+        }
+      }
+
+      // Load messages with pagination
+      async function loadMessages(reset = true) {
+        if (!currentContact) return;
+        if (reset) {
+          currentPage = 1;
+          hasMore = true;
+          document.getElementById("messagesArea").innerHTML = "";
+        }
+        if (isLoading || !hasMore) return;
+        isLoading = true;
+        showLoadingIndicator();
+        try {
+          const queryJid = currentContact.normalizedJid || currentContact.jid;
+          const response = await fetch(`/api/messages/${encodeURIComponent(queryJid)}?page=${currentPage}`);
+          const data = await response.json();
+          totalMessages = data.total || 0;
+          hasMore = data.has_more || false;
+          const messages = data.messages || [];
+          if (messages.length > 0) {
+            renderMessages(messages, !reset);
+            if (reset) document.getElementById("messagesArea").scrollTop = document.getElementById("messagesArea").scrollHeight;
+          } else if (currentPage === 1 && messages.length === 0) {
+            document.getElementById("messagesArea").innerHTML = '<div class="empty-state"><p>No messages yet. Start a conversation!</p></div>';
+          }
+        } catch (err) {
+          console.error(err);
+          if (currentPage === 1) document.getElementById("messagesArea").innerHTML = '<div class="empty-state"><p>Error loading messages</p></div>';
+        } finally {
+          isLoading = false;
+          removeLoadingIndicator();
+        }
+      }
+
+      function handleScroll() {
+        const container = document.getElementById("messagesArea");
+        if (!container || isLoading || !hasMore) return;
+        if (container.scrollTop <= 100) {
+          currentPage++;
+          loadMessages(false);
+        }
+      }
+
+      // Select contact
       function selectContact(jid, name, number) {
-        // Simpan JID asli dan JID ternormalisasi
         let normalizedNumber = number;
-        if (normalizedNumber.includes("@c.us")) {
-          normalizedNumber = normalizedNumber.replace(
-            "@c.us",
-            "@s.whatsapp.net",
-          );
-        }
-        if (!normalizedNumber.includes("@")) {
-          normalizedNumber = normalizedNumber + "@s.whatsapp.net";
-        }
-
-        currentContact = {
-          jid: jid,
-          name: name,
-          number: normalizedNumber, // ← Selalu pakai @s.whatsapp.net
-        };
+        if (normalizedNumber.includes("@c.us")) normalizedNumber = normalizedNumber.replace("@c.us", "@s.whatsapp.net");
+        if (!normalizedNumber.includes("@")) normalizedNumber = normalizedNumber + "@s.whatsapp.net";
+        currentContact = { jid, name, number: normalizedNumber };
         currentPage = 1;
         hasMore = true;
-
         document.getElementById("chatHeader").style.display = "flex";
         document.getElementById("inputArea").style.display = "flex";
         document.getElementById("chatAvatar").textContent = getInitials(name);
         document.getElementById("chatName").textContent = name;
         document.getElementById("chatNumber").textContent = number;
-
         const messagesArea = document.getElementById("messagesArea");
         messagesArea.removeEventListener("scroll", handleScroll);
         messagesArea.addEventListener("scroll", handleScroll);
-
         loadMessages(true);
       }
 
-      window.sendMessage = function () {
+      // Send text message
+      window.sendMessage = function() {
         const input = document.getElementById("messageInput");
         const text = input.value.trim();
-
         if (!currentContact?.number || !text) {
           if (!currentContact?.number) alert("Pilih kontak dulu");
           return;
         }
-
-        // Langsung tampilkan di UI (optimistic update)
-        addMessageToBottom(text, true);
+        addMessageToBottom(text, true, new Date(), null, null, false, "pending");
         input.value = "";
-
-        // Kirim via WebSocket
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: "send_message",
-              data: {
-                to: currentContact.number,
-                text: text,
-              },
-            }),
-          );
-          console.log(
-            "✅ Message sent via WebSocket to:",
-            currentContact.number,
-          );
+          ws.send(JSON.stringify({ type: "send_message", data: { to: currentContact.number, text: text } }));
         } else {
-          console.error("WebSocket not connected. State:", ws?.readyState);
           alert("Koneksi WebSocket terputus, silakan refresh halaman");
         }
       };
-      function escapeHtml(text) {
-        const div = document.createElement("div");
-        div.textContent = text;
-        return div.innerHTML;
-      }
-
-      function getInitials(name) {
-        if (!name) return "?";
-        if (name.includes("@")) {
-          name = name.split("@")[0];
-        }
-        if (/^\d+$/.test(name)) {
-          return name.slice(-2);
-        }
-        const words = name.split(" ");
-        if (words.length === 1) return name.charAt(0).toUpperCase();
-        return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
-      }
 
       function handleKeyPress(event) {
-        if (event.key === "Enter") {
-          sendMessage();
-        }
+        if (event.key === "Enter") sendMessage();
       }
 
       function showEmojiPicker() {
@@ -856,8 +778,7 @@
         picker.style.gap = "5px";
         picker.style.zIndex = "1000";
         picker.style.boxShadow = "0 2px 10px rgba(0,0,0,0.1)";
-
-        emojis.forEach((emoji) => {
+        emojis.forEach(emoji => {
           const btn = document.createElement("button");
           btn.textContent = emoji;
           btn.style.fontSize = "24px";
@@ -870,215 +791,166 @@
           };
           picker.appendChild(btn);
         });
-
         document.body.appendChild(picker);
-
         setTimeout(() => {
           document.addEventListener("click", function removePicker(e) {
-            if (!picker.contains(e.target)) {
-              picker.remove();
-              document.removeEventListener("click", removePicker);
-            }
+            if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener("click", removePicker); }
           });
         }, 0);
       }
 
+      // File upload
+      function showFilePicker() {
+        document.getElementById("fileInput").click();
+      }
+      document.getElementById("fileInput").addEventListener("change", async function(e) {
+        const file = e.target.files[0];
+        if (!file || !currentContact) { alert("Pilih kontak dulu"); return; }
+        if (file.size > 16 * 1024 * 1024) { alert("File terlalu besar! Maksimal 16MB"); return; }
+        const loadingId = showLoadingMessage("Mengirim file...");
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          const base64 = evt.target.result.split(",")[1];
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: "send_media",
+              data: {
+                to: currentContact.number,
+                file_data: base64,
+                file_name: file.name,
+                file_type: file.type,
+                caption: document.getElementById("messageInput").value || ""
+              }
+            }));
+            const isImage = file.type.startsWith("image/");
+            const mediaContent = isImage ? "📷 Image" : `📄 ${file.name}`;
+            addMessageToBottom(mediaContent, true, new Date(), null, null, false, "pending");
+            document.getElementById("messageInput").value = "";
+          } else {
+            alert("WebSocket tidak terhubung");
+          }
+          removeLoadingMessage(loadingId);
+        };
+        reader.onerror = () => { removeLoadingMessage(loadingId); alert("Gagal membaca file"); };
+        reader.readAsDataURL(file);
+      });
+
+      // Contacts
       async function loadContacts() {
         try {
           const response = await fetch("/api/chats");
           let data = await response.json();
-
-          // Ambil last message untuk setiap kontak via API terpisah (async parallel)
           const promises = data.map(async (contact) => {
             try {
-              const msgRes = await fetch(
-                `/api/messages/${encodeURIComponent(contact.jid)}?page=1`,
-              );
+              const msgRes = await fetch(`/api/messages/${encodeURIComponent(contact.jid)}?page=1`);
               const msgData = await msgRes.json();
               const messages = msgData.messages || [];
-              const lastMsg =
-                messages.length > 0 ? messages[messages.length - 1] : null;
-              return {
-                ...contact,
-                last_message: lastMsg ? lastMsg.content : "",
-                last_message_time: lastMsg ? lastMsg.timestamp : null,
-              };
-            } catch (e) {
-              return { ...contact, last_message: "", last_message_time: null };
-            }
+              const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+              return { ...contact, last_message: lastMsg ? lastMsg.content : "", last_message_time: lastMsg ? lastMsg.timestamp : null };
+            } catch (e) { return { ...contact, last_message: "", last_message_time: null }; }
           });
-
           let contactsWithLastMsg = await Promise.all(promises);
-
-          // Sorting berdasarkan last_message_time (descending)
-          contactsWithLastMsg.sort((a, b) => {
-            const timeA = a.last_message_time
-              ? new Date(a.last_message_time)
-              : 0;
-            const timeB = b.last_message_time
-              ? new Date(b.last_message_time)
-              : 0;
-            return timeB - timeA;
-          });
-
+          contactsWithLastMsg.sort((a, b) => (b.last_message_time ? new Date(b.last_message_time) : 0) - (a.last_message_time ? new Date(a.last_message_time) : 0));
           contacts = contactsWithLastMsg;
           renderContacts();
         } catch (err) {
           console.error(err);
-          document.getElementById("contactsList").innerHTML =
-            '<div class="loading">Failed to load contacts</div>';
+          document.getElementById("contactsList").innerHTML = '<div class="loading">Failed to load contacts</div>';
         }
       }
       function renderContacts() {
         const container = document.getElementById("contactsList");
-        const searchTerm =
-          document.getElementById("searchInput")?.value.toLowerCase() || "";
-
-        const filtered = contacts.filter(
-          (c) =>
-            c.name?.toLowerCase().includes(searchTerm) ||
-            c.number?.toLowerCase().includes(searchTerm),
-        );
-
-        if (filtered.length === 0) {
-          container.innerHTML = '<div class="loading">No contacts found</div>';
-          return;
-        }
-
-        container.innerHTML = filtered
-          .map((contact) => {
-            const displayName = contact.name || contact.number;
-            const lastMessage = contact.last_message || "";
-            const lastTime = contact.last_message_time
-              ? formatMessageTime(contact.last_message_time)
-              : "";
-
-            return `
-            <div class="contact-item" onclick="selectContact('${escapeHtml(contact.jid)}', '${escapeHtml(displayName)}', '${escapeHtml(contact.number)}')">
-                <div class="contact-avatar">${getInitials(displayName)}</div>
-                <div class="contact-info">
-                    <div class="contact-name">${escapeHtml(displayName)}</div>
-                    <div class="contact-last-message">${escapeHtml(lastMessage.substring(0, 40))}</div>
-                </div>
-                <div class="contact-time">${lastTime}</div>
-            </div>
-        `;
-          })
-          .join("");
+        const searchTerm = document.getElementById("searchInput")?.value.toLowerCase() || "";
+        const filtered = contacts.filter(c => {
+          if (!c.jid || c.jid.includes("@broadcast") || c.jid.includes("@newsletter") || c.jid.startsWith("status@")) return false;
+          return c.name?.toLowerCase().includes(searchTerm) || c.number?.toLowerCase().includes(searchTerm);
+        });
+        if (filtered.length === 0) { container.innerHTML = '<div class="loading">No contacts found</div>'; return; }
+        container.innerHTML = filtered.map(contact => {
+          const displayName = contact.name || contact.number;
+          const lastMessage = contact.last_message || "";
+          const lastTime = contact.last_message_time ? formatMessageTime(contact.last_message_time) : "";
+          return `<div class="contact-item" onclick="selectContact('${escapeHtml(contact.jid)}', '${escapeHtml(displayName)}', '${escapeHtml(contact.number)}')">
+                    <div class="contact-avatar">${getInitials(displayName)}</div>
+                    <div class="contact-info">
+                        <div class="contact-name">${escapeHtml(displayName)}</div>
+                        <div class="contact-last-message">${escapeHtml(lastMessage.substring(0, 40))}</div>
+                    </div>
+                    <div class="contact-time">${lastTime}</div>
+                  </div>`;
+        }).join("");
       }
 
-      function formatMessageTime(timestamp) {
-        if (!timestamp) return "";
-        const date = new Date(timestamp);
-        const now = new Date();
-        const diff = now - date;
-        if (diff < 60 * 1000) return "Now";
-        if (diff < 60 * 60 * 1000) return `${Math.floor(diff / 60000)}m`;
-        if (diff < 24 * 60 * 60 * 1000)
-          return date.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        return date.toLocaleDateString([], { day: "numeric", month: "short" });
-      }
-      function checkStatus() {
-        fetch("/api/status-full")
-          .then((res) => res.json())
-          .then((data) => {
-            const statusEl = document.getElementById("connection-status");
-            if (statusEl) {
-              if (data.is_logged_in && data.is_connected) {
-                statusEl.textContent = "Connected";
-                statusEl.style.background = "#25d366";
-                loadContacts();
+      // WebSocket connection
+      function connectWebSocket() {
+        ws = new WebSocket("ws://localhost:8084/ws");
+        ws.onopen = () => console.log("WebSocket connected");
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          console.log("WebSocket message:", data);
+          switch (data.type) {
+            case "new_message":
+              const msg = data.message;
+              const isCurrentChat = currentContact && (msg.to_jid === currentContact.jid || msg.from_jid === currentContact.jid);
+              if (isCurrentChat) {
+                const msgWithSender = { ...msg, chat_type: msg.chat_type || (msg.to_jid?.includes("@g.us") ? "GROUP" : "PRIVATE"), status: msg.status || "sent" };
+                const messageDiv = createMessageElement(msgWithSender);
+                document.getElementById("messagesArea").appendChild(messageDiv);
+                document.getElementById("messagesArea").scrollTop = document.getElementById("messagesArea").scrollHeight;
+                totalMessages++;
               } else {
-                statusEl.textContent = "Disconnected";
-                statusEl.style.background = "#dc2626";
+                unreadCount++;
+                updateTitleNotification(unreadCount);
+                const senderName = msg.sender_name || msg.push_name || extractNumber(msg.from_jid);
+                showDesktopNotification(senderName, msg.content);
+                loadContacts();
               }
-            }
-          })
-          .catch((err) => console.error(err));
+              break;
+            case "message_status":
+              console.log(`Message ${data.data.id} status: ${data.data.status}`);
+              break;
+            case "login_success":
+              console.log("Login success, refreshing...");
+              loadContacts();
+              break;
+            case "media_sent":
+              console.log("Media sent:", data.data);
+              break;
+            case "error":
+              console.error("WebSocket error:", data.error);
+              alert("Error: " + data.error);
+              break;
+            default: console.log("Unknown message type:", data.type);
+          }
+        };
+        ws.onerror = (error) => console.error("WebSocket error:", error);
+        ws.onclose = () => { console.log("WebSocket disconnected, reconnecting..."); setTimeout(connectWebSocket, 3000); };
       }
 
-      // Initialization
+      function checkStatus() {
+        fetch("/api/status-full").then(res => res.json()).then(data => {
+          const statusEl = document.getElementById("connection-status");
+          if (statusEl) {
+            if (data.is_logged_in && data.is_connected) {
+              statusEl.textContent = "Connected";
+              statusEl.style.background = "#25d366";
+              loadContacts();
+            } else {
+              statusEl.textContent = "Disconnected";
+              statusEl.style.background = "#dc2626";
+            }
+          }
+        }).catch(err => console.error(err));
+      }
+
+      // Initialize
       connectWebSocket();
       checkStatus();
       setInterval(checkStatus, 5000);
-
       const searchInput = document.getElementById("searchInput");
-      if (searchInput) {
-        searchInput.addEventListener("input", () => renderContacts());
-      }
-
-      // Fungsi untuk play suara notifikasi
-      function playNotificationSound() {
-        try {
-          notificationSound
-            .play()
-            .catch((e) => console.log("Audio play failed:", e));
-        } catch (e) {
-          console.log("Audio not supported");
-        }
-      }
-
-      // Fungsi untuk update title dengan unread count
-      function updateTitleNotification(count) {
-        if (count > 0) {
-          document.title = `(${count}) ${originalTitle}`;
-        } else {
-          document.title = originalTitle;
-        }
-      }
-
-      // Fungsi request izin notifikasi browser
-      function requestNotificationPermission() {
-        if ("Notification" in window && Notification.permission === "default") {
-          Notification.requestPermission();
-        }
-      }
-
-      // Fungsi tampilkan notifikasi desktop
-      function showDesktopNotification(sender, message, isGroup = false) {
-        if (!("Notification" in window)) return;
-        if (Notification.permission !== "granted") return;
-
-        const options = {
-          body: message,
-          icon: "https://web.whatsapp.com/favicon.ico",
-          tag: sender,
-          requireInteraction: false,
-          silent: false,
-        };
-
-        const title = isGroup ? `📢 ${sender}` : `💬 ${sender}`;
-        const notification = new Notification(title, options);
-
-        // Klik notifikasi untuk fokus ke tab
-        notification.onclick = function () {
-          window.focus();
-          notification.close();
-        };
-
-        // Auto close setelah 5 detik
-        setTimeout(() => notification.close(), 5000);
-      }
-      window.addEventListener("focus", function () {
-        unreadCount = 0;
-        updateTitleNotification(0);
-      });
+      if (searchInput) searchInput.addEventListener("input", () => renderContacts());
+      window.addEventListener("focus", () => { unreadCount = 0; updateTitleNotification(0); });
       requestNotificationPermission();
-      // Fungsi untuk enable notifikasi
-      function enableNotifications() {
-        if ("Notification" in window) {
-          Notification.requestPermission().then((perm) => {
-            if (perm === "granted") {
-              alert("Notifikasi diaktifkan!");
-            }
-          });
-        } else {
-          alert("Browser tidak support notifikasi");
-        }
-      }
     </script>
   </body>
 </html>
